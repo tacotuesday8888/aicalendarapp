@@ -1,0 +1,22 @@
+{
+  "name": "aicalendarapp-functions",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "serve": "npx -y firebase-tools@latest emulators:start --only functions",
+    "deploy": "npx -y firebase-tools@latest deploy --only functions"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^6.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}
