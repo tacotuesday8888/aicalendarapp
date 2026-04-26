@@ -1,6 +1,7 @@
 import { z } from "genkit";
+import { logger } from "firebase-functions/v2";
 
-import { getAIProviderMode } from "./config.js";
+import { getAIProviderMode, isAIStubFallbackEnabled } from "./config.js";
 import { configuredVertexModel, defaultGenerationConfig, genkitAI } from "./genkit.js";
 import { ASSISTANT_CHAT_SYSTEM_PROMPT } from "./prompts/assistant_chat.js";
 import { GOAL_PLAN_GENERATION_SYSTEM_PROMPT } from "./prompts/goal_plan_generation.js";
@@ -51,7 +52,11 @@ export const assistantChatFlow = genkitAI.defineFlow(
   },
   async ({ payload, context }, { sendChunk }): Promise<AssistantChatResult> => {
     if (getAIProviderMode() === "vertex") {
-      return generateAssistantChatWithVertex(payload, context, sendChunk);
+      try {
+        return await generateAssistantChatWithVertex(payload, context, sendChunk);
+      } catch (error) {
+        handleProviderFallback("assistant_chat", error);
+      }
     }
 
     const result = buildAssistantStubResult(payload.message, context.goals.length, context.plannerBlocks.length);
@@ -75,11 +80,15 @@ export const goalPlanGenerationFlow = genkitAI.defineFlow(
   },
   async ({ payload, context }): Promise<GoalPlanGenerationResult> => {
     if (getAIProviderMode() === "vertex") {
-      return generateStructuredWithVertex(
-        GOAL_PLAN_GENERATION_SYSTEM_PROMPT,
-        workflowPrompt("goal_plan_generation", payload, context),
-        goalPlanGenerationResultSchema
-      );
+      try {
+        return await generateStructuredWithVertex(
+          GOAL_PLAN_GENERATION_SYSTEM_PROMPT,
+          workflowPrompt("goal_plan_generation", payload, context),
+          goalPlanGenerationResultSchema
+        );
+      } catch (error) {
+        handleProviderFallback("goal_plan_generation", error);
+      }
     }
 
     const start = parseDateOrNow(payload.startDate);
@@ -145,11 +154,15 @@ export const vibeFeedbackFlow = genkitAI.defineFlow(
     }
 
     if (getAIProviderMode() === "vertex") {
-      return generateStructuredWithVertex(
-        VIBE_FEEDBACK_SYSTEM_PROMPT,
-        workflowPrompt("vibe_feedback", payload),
-        vibeFeedbackResultSchema
-      );
+      try {
+        return await generateStructuredWithVertex(
+          VIBE_FEEDBACK_SYSTEM_PROMPT,
+          workflowPrompt("vibe_feedback", payload),
+          vibeFeedbackResultSchema
+        );
+      } catch (error) {
+        handleProviderFallback("vibe_feedback", error);
+      }
     }
 
     return vibeFeedbackResultSchema.parse({
@@ -171,11 +184,15 @@ export const syllabusImportFlow = genkitAI.defineFlow(
   },
   async ({ payload }): Promise<SyllabusImportResult> => {
     if (getAIProviderMode() === "vertex") {
-      return generateStructuredWithVertex(
-        SYLLABUS_IMPORT_SYSTEM_PROMPT,
-        workflowPrompt("syllabus_import", payload),
-        syllabusImportResultSchema
-      );
+      try {
+        return await generateStructuredWithVertex(
+          SYLLABUS_IMPORT_SYSTEM_PROMPT,
+          workflowPrompt("syllabus_import", payload),
+          syllabusImportResultSchema
+        );
+      } catch (error) {
+        handleProviderFallback("syllabus_import", error);
+      }
     }
 
     const usefulLines = payload.extractedText
@@ -282,6 +299,18 @@ function workflowPrompt(workflow: string, payload: unknown, context?: unknown): 
 
 function safeJSON(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function handleProviderFallback(workflow: string, error: unknown): void {
+  if (!isAIStubFallbackEnabled()) {
+    throw error;
+  }
+
+  logger.warn("AI provider failed; using stub fallback.", {
+    workflow,
+    provider: getAIProviderMode(),
+    errorMessage: error instanceof Error ? error.message : "Unknown provider error"
+  });
 }
 
 function buildAssistantStubResult(message: string, goalCount: number, plannerBlockCount: number): AssistantChatResult {

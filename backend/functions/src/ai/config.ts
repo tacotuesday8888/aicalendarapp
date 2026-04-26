@@ -28,3 +28,8 @@ export function getAIMaxOutputTokens(): number {
   const parsed = rawValue ? Number.parseInt(rawValue, 10) : DEFAULT_MAX_OUTPUT_TOKENS;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_OUTPUT_TOKENS;
 }
+
+export function isAIStubFallbackEnabled(): boolean {
+  const rawValue = process.env.AI_ENABLE_STUB_FALLBACK?.trim().toLowerCase();
+  return rawValue !== "false" && rawValue !== "0";
+}
