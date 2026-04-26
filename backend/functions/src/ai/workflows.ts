@@ -1,0 +1,278 @@
+import { z } from "genkit";
+
+import { genkitAI } from "./genkit.js";
+import { ASSISTANT_CHAT_SYSTEM_PROMPT } from "./prompts/assistant_chat.js";
+import { GOAL_PLAN_GENERATION_SYSTEM_PROMPT } from "./prompts/goal_plan_generation.js";
+import { SYLLABUS_IMPORT_SYSTEM_PROMPT } from "./prompts/syllabus_import.js";
+import { VIBE_FEEDBACK_SYSTEM_PROMPT } from "./prompts/vibe_feedback.js";
+import {
+  assistantChatPayloadSchema,
+  assistantChatResultSchema,
+  goalPlanGenerationPayloadSchema,
+  goalPlanGenerationResultSchema,
+  syllabusImportPayloadSchema,
+  syllabusImportResultSchema,
+  vibeFeedbackPayloadSchema,
+  vibeFeedbackResultSchema,
+  type AssistantChatResult,
+  type GoalPlanGenerationResult,
+  type SyllabusImportResult,
+  type VibeFeedbackResult
+} from "./schemas.js";
+
+const assistantWorkflowContextSchema = z.object({
+  timezone: z.string(),
+  currentScreen: z.string().nullable(),
+  date: z.string().nullable(),
+  contextHints: z.record(z.any()),
+  goals: z.array(z.object({ id: z.string(), data: z.any() })),
+  plannerBlocks: z.array(z.object({ id: z.string(), data: z.any() }))
+});
+
+const goalPlanWorkflowContextSchema = z.object({
+  goal: z.object({
+    id: z.string().nullable(),
+    title: z.string(),
+    description: z.string()
+  })
+});
+
+export const assistantChatFlow = genkitAI.defineFlow(
+  {
+    name: "assistant_chat",
+    inputSchema: z.object({
+      userID: z.string().min(1),
+      payload: assistantChatPayloadSchema,
+      context: assistantWorkflowContextSchema
+    }),
+    streamSchema: z.string(),
+    outputSchema: assistantChatResultSchema
+  },
+  async ({ payload, context }, { sendChunk }): Promise<AssistantChatResult> => {
+    void ASSISTANT_CHAT_SYSTEM_PROMPT;
+
+    const result = buildAssistantStubResult(payload.message, context.goals.length, context.plannerBlocks.length);
+    for (const chunk of chunkText(result.message)) {
+      sendChunk(chunk);
+    }
+
+    return assistantChatResultSchema.parse(result);
+  }
+);
+
+export const goalPlanGenerationFlow = genkitAI.defineFlow(
+  {
+    name: "goal_plan_generation",
+    inputSchema: z.object({
+      userID: z.string().min(1),
+      payload: goalPlanGenerationPayloadSchema,
+      context: goalPlanWorkflowContextSchema
+    }),
+    outputSchema: goalPlanGenerationResultSchema
+  },
+  async ({ payload, context }): Promise<GoalPlanGenerationResult> => {
+    void GOAL_PLAN_GENERATION_SYSTEM_PROMPT;
+
+    const start = parseDateOrNow(payload.startDate);
+    const midpoint = addDays(start, Math.max(1, Math.round((payload.timelineWeeks * 7) / 2)));
+    const end = addDays(start, Math.max(2, payload.timelineWeeks * 7));
+
+    return goalPlanGenerationResultSchema.parse({
+      summary: `Draft plan for ${context.goal.title}. Review these milestones before adding anything to your planner.`,
+      milestones: [
+        {
+          title: "Clarify the finish line",
+          dueDate: start.toISOString(),
+          description: "Write the target outcome, constraints, and what done looks like."
+        },
+        {
+          title: "Complete the first checkpoint",
+          dueDate: midpoint.toISOString(),
+          description: "Finish a concrete midpoint deliverable and adjust the plan if needed."
+        },
+        {
+          title: "Review and polish",
+          dueDate: end.toISOString(),
+          description: "Check the work against the goal and prepare the final version."
+        }
+      ],
+      nextActions: [
+        {
+          title: "Write the goal in one measurable sentence",
+          estimatedMinutes: 10,
+          priority: "high"
+        },
+        {
+          title: "List the first three blockers",
+          estimatedMinutes: 15,
+          priority: "medium"
+        },
+        {
+          title: "Schedule the first focused work block",
+          estimatedMinutes: 10,
+          priority: "high"
+        }
+      ]
+    });
+  }
+);
+
+export const vibeFeedbackFlow = genkitAI.defineFlow(
+  {
+    name: "vibe_feedback",
+    inputSchema: z.object({
+      userID: z.string().min(1),
+      payload: vibeFeedbackPayloadSchema
+    }),
+    outputSchema: vibeFeedbackResultSchema
+  },
+  async ({ payload }): Promise<VibeFeedbackResult> => {
+    void VIBE_FEEDBACK_SYSTEM_PROMPT;
+
+    if (containsImmediateDanger(payload.reflectionText)) {
+      return vibeFeedbackResultSchema.parse({
+        feedback:
+          "If you might hurt yourself or you are in immediate danger, contact emergency services now or reach out to a trusted person who can stay with you. For the next minute, move away from anything unsafe and ask for help directly.",
+        needs_escalation: true
+      });
+    }
+
+    return vibeFeedbackResultSchema.parse({
+      feedback:
+        "That sounds like a lot to carry, so make the next step small and visible. Pick one task you can move forward in 10 minutes, then reassess instead of trying to fix the whole day at once.",
+      needs_escalation: false
+    });
+  }
+);
+
+export const syllabusImportFlow = genkitAI.defineFlow(
+  {
+    name: "syllabus_import",
+    inputSchema: z.object({
+      userID: z.string().min(1),
+      payload: syllabusImportPayloadSchema
+    }),
+    outputSchema: syllabusImportResultSchema
+  },
+  async ({ payload }): Promise<SyllabusImportResult> => {
+    void SYLLABUS_IMPORT_SYSTEM_PROMPT;
+
+    const firstUsefulLine = payload.extractedText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+
+    return syllabusImportResultSchema.parse({
+      courses: firstUsefulLine
+        ? [
+            {
+              name: firstUsefulLine,
+              instructor: null,
+              assignments: []
+            }
+          ]
+        : [],
+      warnings: [
+        {
+          message:
+            "Stub parser only created a review draft. Real syllabus extraction will be enabled after Vertex AI Gemini is connected.",
+          sourceText: firstUsefulLine ?? null
+        }
+      ]
+    });
+  }
+);
+
+function buildAssistantStubResult(message: string, goalCount: number, plannerBlockCount: number): AssistantChatResult {
+  if (asksAssistantIdentity(message)) {
+    return {
+      message: "I’m your in-app productivity assistant, here to help you plan, study, and stay organized.",
+      draftActions: []
+    };
+  }
+
+  if (asksForAcademicCheating(message)) {
+    return {
+      message:
+        "I can help you study, outline, plan, or understand the work, but I can't write or submit academic work for you.",
+      draftActions: []
+    };
+  }
+
+  const draftActions = shouldSuggestDraftAction(message)
+    ? [
+        {
+          type: "planner_suggestion",
+          title: "Review one focused study block",
+          dueAt: null,
+          reason: "This is a draft suggestion only. Confirm it in the app before anything is added to your planner."
+        }
+      ]
+    : [];
+
+  return {
+    message:
+      `AI is running in stub mode. I found ${goalCount} goal item(s) and ${plannerBlockCount} planner block(s), ` +
+      "so the backend/auth/context path is working; real model responses will come after Vertex AI Gemini is enabled.",
+    draftActions
+  };
+}
+
+function asksAssistantIdentity(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes("what are you") || normalized.includes("who are you") || normalized.includes("what model");
+}
+
+function asksForAcademicCheating(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("write my essay") ||
+    normalized.includes("do my homework") ||
+    normalized.includes("take my test") ||
+    normalized.includes("cheat")
+  );
+}
+
+function shouldSuggestDraftAction(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("plan") ||
+    normalized.includes("schedule") ||
+    normalized.includes("calendar") ||
+    normalized.includes("deadline") ||
+    normalized.includes("goal")
+  );
+}
+
+function containsImmediateDanger(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes("kill myself") ||
+    normalized.includes("suicide") ||
+    normalized.includes("end my life") ||
+    normalized.includes("hurt myself") ||
+    normalized.includes("immediate danger")
+  );
+}
+
+function parseDateOrNow(rawDate: string): Date {
+  const parsed = new Date(rawDate);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function addDays(date: Date, days: number): Date {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function chunkText(text: string): string[] {
+  const words = text.split(" ");
+  const chunks: string[] = [];
+
+  for (let index = 0; index < words.length; index += 8) {
+    chunks.push(words.slice(index, index + 8).join(" "));
+  }
+
+  return chunks;
+}
