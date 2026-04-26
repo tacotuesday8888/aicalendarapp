@@ -103,6 +103,7 @@ final class AppContainer {
         ReflectionService.shared.databaseService = databaseService
         AssistantService.shared.databaseService = databaseService
         AssistantService.shared.backendFunctionService = backendFunctionService
+        AssistantService.shared.aiBackendService = aiBackendService
         SyllabusImportService.shared.databaseService = databaseService
         SyllabusImportService.shared.storageService = storageService
         SyllabusImportService.shared.backendFunctionService = backendFunctionService

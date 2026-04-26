@@ -1,11 +1,19 @@
 import { serverTimestamp, userScopedCollection } from "../shared/firestore.js";
 import type {
   AIWorkflow,
+  AssistantChatPayload,
   AssistantChatResult,
   GoalPlanGenerationPayload,
   GoalPlanGenerationResult,
   SyllabusImportResult
 } from "./schemas.js";
+
+type AssistantDraftRecord = {
+  id: string;
+  kind: "goalPlan" | "plannerAdjustment" | "sessionEvaluation" | "checkInSummary";
+  title: string;
+  detail: string;
+};
 
 export async function storeReviewDraft(
   userID: string,
@@ -54,4 +62,90 @@ export async function storeGoalPlanReviewDraft(
     })),
     createdAt: serverTimestamp()
   });
+}
+
+export async function storeAssistantChatReviewState(
+  userID: string,
+  payload: AssistantChatPayload,
+  result: AssistantChatResult,
+  draftID: string | null
+): Promise<void> {
+  const threadRef = userScopedCollection(userID, "assistantThreads").doc("primary");
+  const threadSnapshot = await threadRef.get();
+  const threadData = threadSnapshot.data() as
+    | {
+        id?: string;
+        messages?: unknown[];
+        pendingDrafts?: AssistantDraftRecord[];
+      }
+    | undefined;
+  const timestamp = Date.now();
+  const existingMessages = Array.isArray(threadData?.messages) ? threadData.messages : [];
+  const existingPendingDrafts = Array.isArray(threadData?.pendingDrafts) ? threadData.pendingDrafts : [];
+  const newDrafts = result.draftActions.map((action, index) => ({
+    id: assistantDraftArtifactID(draftID, timestamp, index),
+    kind: assistantDraftKind(action.type),
+    title: action.title,
+    detail: action.dueAt ? `${action.reason} Suggested time: ${action.dueAt}` : action.reason
+  }));
+
+  await Promise.all([
+    threadRef.set(
+      {
+        id: threadData?.id ?? threadRef.id,
+        messages: [
+          ...existingMessages,
+          {
+            id: `${threadRef.id}-user-${timestamp}`,
+            role: "user",
+            content: payload.message,
+            createdAt: new Date(timestamp).toISOString()
+          },
+          {
+            id: `${threadRef.id}-assistant-${timestamp}`,
+            role: "assistant",
+            content: result.message,
+            createdAt: new Date(timestamp).toISOString()
+          }
+        ],
+        pendingDrafts: [...existingPendingDrafts, ...newDrafts],
+        createdAt: threadSnapshot.exists ? threadSnapshot.get("createdAt") ?? serverTimestamp() : serverTimestamp(),
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    ),
+    ...newDrafts.map((draft) =>
+      userScopedCollection(userID, "assistantDraftArtifacts").doc(draft.id).set({
+        ...draft,
+        userID,
+        status: "pending",
+        sourceThreadID: threadRef.id,
+        sourceAIDraftID: draftID,
+        createdAt: serverTimestamp()
+      })
+    )
+  ]);
+}
+
+function assistantDraftArtifactID(draftID: string | null, timestamp: number, index: number): string {
+  const baseID = draftID ?? `assistant-${timestamp}`;
+  return `${baseID}-action-${index + 1}`;
+}
+
+function assistantDraftKind(actionType: string): AssistantDraftRecord["kind"] {
+  const normalized = actionType.toLowerCase();
+
+  if (normalized.includes("goal")) {
+    return "goalPlan";
+  }
+
+  if (normalized.includes("session")) {
+    return "sessionEvaluation";
+  }
+
+  if (normalized.includes("check") || normalized.includes("vibe") || normalized.includes("reflection")) {
+    return "checkInSummary";
+  }
+
+  return "plannerAdjustment";
 }

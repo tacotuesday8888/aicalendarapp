@@ -4,7 +4,7 @@ import { HttpsError, onRequest } from "firebase-functions/v2/https";
 import type { Request, Response } from "express";
 
 import { loadAssistantWorkflowContext, loadGoalPlanWorkflowContext } from "./context.js";
-import { storeGoalPlanReviewDraft, storeReviewDraft } from "./drafts.js";
+import { storeAssistantChatReviewState, storeGoalPlanReviewDraft, storeReviewDraft } from "./drafts.js";
 import {
   assistantChatFlow,
   goalPlanGenerationFlow,
@@ -87,6 +87,7 @@ async function runAIWorkflow(userID: string, request: AIRunRequest): Promise<AIR
       const context = await loadAssistantWorkflowContext(userID, request.payload);
       const result = await assistantChatFlow({ userID, payload: request.payload, context });
       const draftID = await storeReviewDraft(userID, request.workflow, result);
+      await storeAssistantChatReviewState(userID, request.payload, result, draftID);
       return { workflow: request.workflow, result, draftID };
     }
     case "goal_plan_generation": {
@@ -126,6 +127,7 @@ async function streamAssistantChat(userID: string, request: Extract<AIRunRequest
 
     const result = await streamResponse.output;
     const draftID = await storeReviewDraft(userID, request.workflow, result);
+    await storeAssistantChatReviewState(userID, request.payload, result, draftID);
     await logAIUsage(userID, request.workflow, "success", { streamed: true });
     writeSSE(response, "final", { workflow: request.workflow, result, draftID });
     response.end();

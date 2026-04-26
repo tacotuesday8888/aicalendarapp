@@ -387,6 +387,7 @@ final class AssistantService: AssistantServicing {
 
     var databaseService: DatabaseServicing?
     var backendFunctionService: BackendFunctionServicing?
+    var aiBackendService: AIBackendServicing?
 
     func observeThread(for userID: String) -> AsyncThrowingStream<AssistantThread, Error> {
         guard let databaseService else {
@@ -415,7 +416,37 @@ final class AssistantService: AssistantServicing {
     }
 
     func sendMessage(_ text: String, for userID: String, snapshot: PlannerSnapshot, goals: [Goal]) async throws -> AssistantThread {
-        try await requiredBackendFunctionService(backendFunctionService).assistantRespond(
+        if let aiBackendService {
+            let response = try await aiBackendService.run(
+                workflow: .assistantChat,
+                payload: AIAssistantChatPayload(
+                    message: text,
+                    timezone: TimeZone.current.identifier,
+                    currentScreen: "assistant",
+                    date: ISO8601DateFormatter.appJSON.string(from: snapshot.date),
+                    contextHints: [
+                        "nextSuggestedAction": .string(snapshot.nextSuggestedAction),
+                        "goalCount": .number(Double(goals.count)),
+                        "assignmentCount": .number(Double(snapshot.assignments.count))
+                    ]
+                ),
+                decode: AIAssistantChatResult.self
+            )
+
+            if let databaseService,
+               let thread = try? await databaseService.fetch(
+                    AssistantThread.self,
+                    from: .assistantThreads,
+                    id: "primary",
+                    userID: userID
+               ) {
+                return thread
+            }
+
+            return Self.localAssistantThread(userMessage: text, response: response)
+        }
+
+        return try await requiredBackendFunctionService(backendFunctionService).assistantRespond(
             AssistantRequestPayload(userID: userID, message: text, snapshot: snapshot, goals: goals)
         )
     }
@@ -424,6 +455,48 @@ final class AssistantService: AssistantServicing {
         try await requiredBackendFunctionService(backendFunctionService).commitAssistantDraft(
             AssistantDraftCommitPayload(userID: userID, action: action)
         )
+    }
+
+    private static func localAssistantThread(
+        userMessage: String,
+        response: AIWorkflowRunResponse<AIAssistantChatResult>
+    ) -> AssistantThread {
+        let draftID = response.draftID
+        let drafts = response.result.draftActions.enumerated().map { index, action in
+            AssistantDraftAction(
+                id: draftID.map { "\($0)-action-\(index + 1)" } ?? UUID().uuidString,
+                kind: draftKind(for: action.type),
+                title: action.title,
+                detail: action.dueAt.map { "\(action.reason) Suggested time: \($0)" } ?? action.reason
+            )
+        }
+
+        return AssistantThread(
+            id: "primary",
+            messages: [
+                AssistantMessage(role: .user, content: userMessage),
+                AssistantMessage(role: .assistant, content: response.result.message)
+            ],
+            pendingDrafts: drafts
+        )
+    }
+
+    private static func draftKind(for actionType: String) -> AssistantDraftKind {
+        let normalized = actionType.lowercased()
+
+        if normalized.contains("goal") {
+            return .goalPlan
+        }
+
+        if normalized.contains("session") {
+            return .sessionEvaluation
+        }
+
+        if normalized.contains("check") || normalized.contains("vibe") || normalized.contains("reflection") {
+            return .checkInSummary
+        }
+
+        return .plannerAdjustment
     }
 }
 
