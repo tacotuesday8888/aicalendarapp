@@ -19,7 +19,7 @@ final class TodayViewModel: ObservableObject {
     private let user: UserProfile
     private let plannerService: PlannerServicing
     private let reflectionService: ReflectionServicing
-    private let backendFunctionService: BackendFunctionServicing
+    private let aiBackendService: AIBackendServicing
     private let databaseService: DatabaseServicing
     private let analyticsService: AnalyticsServicing
     private var tasks = [Task<Void, Never>]()
@@ -28,14 +28,14 @@ final class TodayViewModel: ObservableObject {
         user: UserProfile,
         plannerService: PlannerServicing,
         reflectionService: ReflectionServicing,
-        backendFunctionService: BackendFunctionServicing,
+        aiBackendService: AIBackendServicing,
         databaseService: DatabaseServicing,
         analyticsService: AnalyticsServicing
     ) {
         self.user = user
         self.plannerService = plannerService
         self.reflectionService = reflectionService
-        self.backendFunctionService = backendFunctionService
+        self.aiBackendService = aiBackendService
         self.databaseService = databaseService
         self.analyticsService = analyticsService
     }
@@ -89,14 +89,26 @@ final class TodayViewModel: ObservableObject {
         defer { isSubmittingVibeCheck = false }
 
         do {
-            let feedback = try await backendFunctionService.generateVibeFeedback(
-                VibeFeedbackRequestPayload(userID: user.id, prompt: trimmedPrompt)
+            let feedback = try await aiBackendService.run(
+                workflow: .vibeFeedback,
+                payload: AIVibeFeedbackPayload(
+                    reflectionText: trimmedPrompt,
+                    timezone: TimeZone.current.identifier,
+                    recentContext: [
+                        "mood": .string(selectedVibeMood.rawValue),
+                        "screen": .string("today")
+                    ]
+                ),
+                decode: AIVibeFeedbackResult.self
             )
-            let vibe = VibeCheck(mood: selectedVibeMood, prompt: trimmedPrompt, feedback: feedback.feedback)
+            let vibe = VibeCheck(mood: selectedVibeMood, prompt: trimmedPrompt, feedback: feedback.result.feedback)
             try await reflectionService.saveVibeCheck(vibe, for: user.id)
             vibePrompt = ""
             errorMessage = nil
-            analyticsService.track(event: "vibe_check_submitted")
+            analyticsService.track(
+                event: "vibe_check_submitted",
+                parameters: ["needs_escalation": feedback.result.needsEscalation]
+            )
         } catch {
             errorMessage = AppError.wrap(error, fallback: "Unable to save vibe check.").errorDescription
         }
@@ -184,7 +196,7 @@ struct TodayView: View {
             user: user,
             plannerService: container.plannerService,
             reflectionService: container.reflectionService,
-            backendFunctionService: container.backendFunctionService,
+            aiBackendService: container.aiBackendService,
             databaseService: container.databaseService,
             analyticsService: container.analyticsService
         ))

@@ -17,14 +17,19 @@ final class ReflectionsViewModel: ObservableObject {
 
     private let user: UserProfile
     private let reflectionService: ReflectionServicing
-    private let backendFunctionService: BackendFunctionServicing
+    private let aiBackendService: AIBackendServicing
     private let analyticsService: AnalyticsServicing
     private var tasks = [Task<Void, Never>]()
 
-    init(user: UserProfile, reflectionService: ReflectionServicing, backendFunctionService: BackendFunctionServicing, analyticsService: AnalyticsServicing) {
+    init(
+        user: UserProfile,
+        reflectionService: ReflectionServicing,
+        aiBackendService: AIBackendServicing,
+        analyticsService: AnalyticsServicing
+    ) {
         self.user = user
         self.reflectionService = reflectionService
-        self.backendFunctionService = backendFunctionService
+        self.aiBackendService = aiBackendService
         self.analyticsService = analyticsService
     }
 
@@ -100,18 +105,30 @@ final class ReflectionsViewModel: ObservableObject {
         defer { isSavingVibeCheck = false }
 
         do {
-            let response = try await backendFunctionService.generateVibeFeedback(
-                VibeFeedbackRequestPayload(userID: user.id, prompt: trimmedPrompt)
+            let response = try await aiBackendService.run(
+                workflow: .vibeFeedback,
+                payload: AIVibeFeedbackPayload(
+                    reflectionText: trimmedPrompt,
+                    timezone: TimeZone.current.identifier,
+                    recentContext: [
+                        "mood": .string(selectedMood.rawValue),
+                        "screen": .string("reflections")
+                    ]
+                ),
+                decode: AIVibeFeedbackResult.self
             )
             let vibeCheck = VibeCheck(
                 mood: selectedMood,
                 prompt: trimmedPrompt,
-                feedback: response.feedback
+                feedback: response.result.feedback
             )
             try await reflectionService.saveVibeCheck(vibeCheck, for: user.id)
             vibePrompt = ""
             errorMessage = nil
-            analyticsService.track(event: "vibe_check_saved")
+            analyticsService.track(
+                event: "vibe_check_saved",
+                parameters: ["needs_escalation": response.result.needsEscalation]
+            )
         } catch {
             errorMessage = AppError.wrap(error, fallback: "Unable to save vibe check.").errorDescription
         }
@@ -167,7 +184,7 @@ struct ReflectionsFeature: View {
         _viewModel = StateObject(wrappedValue: ReflectionsViewModel(
             user: user,
             reflectionService: container.reflectionService,
-            backendFunctionService: container.backendFunctionService,
+            aiBackendService: container.aiBackendService,
             analyticsService: container.analyticsService
         ))
     }
