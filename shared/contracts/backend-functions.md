@@ -2,6 +2,8 @@
 
 These authenticated JSON HTTP and webhook endpoints are the server boundary for privileged logic.
 
+The iOS app sends `POST` JSON requests to the Firebase Functions base URL in `API_BASE_URL`. Authenticated endpoints receive a `userID` in the JSON body and validate it against the verified Firebase token on the server.
+
 ## Authenticated JSON endpoints
 
 - `assistantRespond`
@@ -62,6 +64,12 @@ These authenticated JSON HTTP and webhook endpoints are the server boundary for 
   - Output: `{ success: true }`
   - Ownership: server writes subscription snapshots and deduplicates processed webhook events
   - Security: protect it with the exact authorization header value configured in RevenueCat and mirrored in `REVENUECAT_WEBHOOK_SECRET`
+
+## Calling conventions
+
+- The app automatically attaches the current Firebase ID token as `Authorization: Bearer <token>` when the user is signed in.
+- The app treats these functions as the only path for AI work, privileged writes, import commits, account export/deletion, and billing-derived state updates.
+- `revenueCatWebhook` is the only public HTTP endpoint.
 
 ## Server-owned collections
 
