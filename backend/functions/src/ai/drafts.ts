@@ -153,7 +153,7 @@ export async function storeSyllabusImportReviewJob(
       id: `${courseID ?? `ai-course-${courseIndex + 1}`}-assignment-${assignmentIndex + 1}`,
       courseID,
       title: assignment.title,
-      dueDate: validISODateOrNull(assignment.dueDate),
+      dueDate: normalizedSyllabusDueDate(assignment.dueDate, assignment.sourceText),
       notes: syllabusAssignmentNotes(assignment),
       isComplete: false
     }));
@@ -200,12 +200,36 @@ function assistantDraftKind(actionType: string): AssistantDraftRecord["kind"] {
   return "plannerAdjustment";
 }
 
-function validISODateOrNull(value: string | null): string | null {
+function normalizedSyllabusDueDate(value: string | null, sourceText: string): string | null {
   if (!value || Number.isNaN(Date.parse(value))) {
     return null;
   }
 
-  return new Date(value).toISOString();
+  const parsedDate = new Date(value);
+  if (isLikelyDateOnlyDueDate(parsedDate, sourceText)) {
+    return new Date(
+      Date.UTC(parsedDate.getUTCFullYear(), parsedDate.getUTCMonth(), parsedDate.getUTCDate(), 12, 0, 0, 0)
+    ).toISOString();
+  }
+
+  return parsedDate.toISOString();
+}
+
+function isLikelyDateOnlyDueDate(date: Date, sourceText: string): boolean {
+  if (sourceTextMentionsTime(sourceText)) {
+    return false;
+  }
+
+  return (
+    date.getUTCHours() === 0 &&
+    date.getUTCMinutes() === 0 &&
+    date.getUTCSeconds() === 0 &&
+    date.getUTCMilliseconds() === 0
+  );
+}
+
+function sourceTextMentionsTime(sourceText: string): boolean {
+  return /\b(?:[01]?\d|2[0-3]):[0-5]\d\b|\b(?:[1-9]|1[0-2])\s*(?:a\.?m\.?|p\.?m\.?)\b/i.test(sourceText);
 }
 
 function syllabusAssignmentNotes(assignment: SyllabusImportResult["courses"][number]["assignments"][number]): string {
