@@ -229,7 +229,12 @@ struct SubscriptionState: Codable, Hashable, Sendable {
     var lastSyncedAt: Date
 
     var requiresPaywall: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        // Local development bypass for testing gated AI workflows without starting a purchase flow.
+        return false
+        #else
         entitlement != .active
+        #endif
     }
 
     nonisolated static var locked: SubscriptionState {
