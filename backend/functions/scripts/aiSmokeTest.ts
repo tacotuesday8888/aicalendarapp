@@ -37,6 +37,19 @@ async function runSmokeTest() {
   assistantChatResultSchema.parse(assistantResult);
   assert.equal(assistantResult.draftActions.length, 1);
 
+  const identityResult = await assistantChatFlow({
+    ...assistantInput,
+    payload: {
+      ...assistantInput.payload,
+      message: "What model are you?"
+    }
+  });
+  assert.equal(
+    identityResult.message,
+    "I’m your in-app productivity assistant, here to help you plan, study, and stay organized."
+  );
+  assert.deepEqual(identityResult.draftActions, []);
+
   const streamedAssistant = assistantChatFlow.stream(assistantInput);
   let chunkCount = 0;
   for await (const chunk of streamedAssistant.stream) {
@@ -79,6 +92,17 @@ async function runSmokeTest() {
   vibeFeedbackResultSchema.parse(vibeResult);
   assert.equal(vibeResult.needs_escalation, false);
 
+  const escalationResult = await vibeFeedbackFlow({
+    userID: "smoke-test-user",
+    payload: {
+      reflectionText: "I want to kill myself.",
+      timezone: "America/New_York",
+      recentContext: {}
+    }
+  });
+  vibeFeedbackResultSchema.parse(escalationResult);
+  assert.equal(escalationResult.needs_escalation, true);
+
   const syllabusResult = await syllabusImportFlow({
     userID: "smoke-test-user",
     payload: {
@@ -88,6 +112,7 @@ async function runSmokeTest() {
     }
   });
   syllabusImportResultSchema.parse(syllabusResult);
+  assert.equal(syllabusResult.courses[0]?.assignments[0]?.dueDate, null);
 
   console.log("AI smoke test passed.");
 }
