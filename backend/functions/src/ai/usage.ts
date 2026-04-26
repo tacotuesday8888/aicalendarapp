@@ -1,6 +1,7 @@
 import { HttpsError } from "firebase-functions/v2/https";
 
 import { serverTimestamp, userScopedCollection } from "../shared/firestore.js";
+import { getAIModelName, getAIProviderMode } from "./config.js";
 import type { AIWorkflow } from "./schemas.js";
 
 const DEFAULT_DAILY_LIMIT = 50;
@@ -32,8 +33,8 @@ export async function logAIUsage(
   await userScopedCollection(userID, "aiUsage").add({
     workflow,
     status,
-    provider: "stub",
-    model: "stub",
+    provider: getAIProviderMode(),
+    model: getAIProviderMode() === "vertex" ? getAIModelName() : "stub",
     ...metadata,
     createdAt: serverTimestamp()
   });

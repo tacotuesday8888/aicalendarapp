@@ -13,6 +13,8 @@ import {
   vibeFeedbackResultSchema
 } from "../src/ai/schemas.js";
 
+process.env.AI_PROVIDER = "stub";
+
 async function runSmokeTest() {
   const assistantInput = {
     userID: "smoke-test-user",

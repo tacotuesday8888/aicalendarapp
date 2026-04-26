@@ -1,6 +1,7 @@
 import { z } from "genkit";
 
-import { genkitAI } from "./genkit.js";
+import { getAIProviderMode } from "./config.js";
+import { configuredVertexModel, defaultGenerationConfig, genkitAI } from "./genkit.js";
 import { ASSISTANT_CHAT_SYSTEM_PROMPT } from "./prompts/assistant_chat.js";
 import { GOAL_PLAN_GENERATION_SYSTEM_PROMPT } from "./prompts/goal_plan_generation.js";
 import { SYLLABUS_IMPORT_SYSTEM_PROMPT } from "./prompts/syllabus_import.js";
@@ -49,7 +50,9 @@ export const assistantChatFlow = genkitAI.defineFlow(
     outputSchema: assistantChatResultSchema
   },
   async ({ payload, context }, { sendChunk }): Promise<AssistantChatResult> => {
-    void ASSISTANT_CHAT_SYSTEM_PROMPT;
+    if (getAIProviderMode() === "vertex") {
+      return generateAssistantChatWithVertex(payload, context, sendChunk);
+    }
 
     const result = buildAssistantStubResult(payload.message, context.goals.length, context.plannerBlocks.length);
     for (const chunk of chunkText(result.message)) {
@@ -71,7 +74,13 @@ export const goalPlanGenerationFlow = genkitAI.defineFlow(
     outputSchema: goalPlanGenerationResultSchema
   },
   async ({ payload, context }): Promise<GoalPlanGenerationResult> => {
-    void GOAL_PLAN_GENERATION_SYSTEM_PROMPT;
+    if (getAIProviderMode() === "vertex") {
+      return generateStructuredWithVertex(
+        GOAL_PLAN_GENERATION_SYSTEM_PROMPT,
+        workflowPrompt("goal_plan_generation", payload, context),
+        goalPlanGenerationResultSchema
+      );
+    }
 
     const start = parseDateOrNow(payload.startDate);
     const midpoint = addDays(start, Math.max(1, Math.round((payload.timelineWeeks * 7) / 2)));
@@ -127,14 +136,20 @@ export const vibeFeedbackFlow = genkitAI.defineFlow(
     outputSchema: vibeFeedbackResultSchema
   },
   async ({ payload }): Promise<VibeFeedbackResult> => {
-    void VIBE_FEEDBACK_SYSTEM_PROMPT;
-
     if (containsImmediateDanger(payload.reflectionText)) {
       return vibeFeedbackResultSchema.parse({
         feedback:
           "If you might hurt yourself or you are in immediate danger, contact emergency services now or reach out to a trusted person who can stay with you. For the next minute, move away from anything unsafe and ask for help directly.",
         needs_escalation: true
       });
+    }
+
+    if (getAIProviderMode() === "vertex") {
+      return generateStructuredWithVertex(
+        VIBE_FEEDBACK_SYSTEM_PROMPT,
+        workflowPrompt("vibe_feedback", payload),
+        vibeFeedbackResultSchema
+      );
     }
 
     return vibeFeedbackResultSchema.parse({
@@ -155,7 +170,13 @@ export const syllabusImportFlow = genkitAI.defineFlow(
     outputSchema: syllabusImportResultSchema
   },
   async ({ payload }): Promise<SyllabusImportResult> => {
-    void SYLLABUS_IMPORT_SYSTEM_PROMPT;
+    if (getAIProviderMode() === "vertex") {
+      return generateStructuredWithVertex(
+        SYLLABUS_IMPORT_SYSTEM_PROMPT,
+        workflowPrompt("syllabus_import", payload),
+        syllabusImportResultSchema
+      );
+    }
 
     const usefulLines = payload.extractedText
       .split(/\r?\n/)
@@ -190,6 +211,78 @@ export const syllabusImportFlow = genkitAI.defineFlow(
     });
   }
 );
+
+async function generateAssistantChatWithVertex(
+  payload: z.infer<typeof assistantChatPayloadSchema>,
+  context: z.infer<typeof assistantWorkflowContextSchema>,
+  sendChunk: (chunk: string) => void
+): Promise<AssistantChatResult> {
+  const response = genkitAI.generateStream<typeof assistantChatResultSchema, z.ZodTypeAny>({
+    model: configuredVertexModel(),
+    system: ASSISTANT_CHAT_SYSTEM_PROMPT,
+    prompt: workflowPrompt("assistant_chat", payload, context),
+    output: { schema: assistantChatResultSchema },
+    config: defaultGenerationConfig()
+  });
+  let streamedMessage = "";
+
+  for await (const chunk of response.stream) {
+    const chunkOutput = chunk.output as Partial<AssistantChatResult> | null | undefined;
+    const currentMessage = typeof chunkOutput?.message === "string" ? chunkOutput.message : null;
+    if (!currentMessage || currentMessage.length <= streamedMessage.length) {
+      continue;
+    }
+
+    sendChunk(currentMessage.slice(streamedMessage.length));
+    streamedMessage = currentMessage;
+  }
+
+  const finalResponse = await response.response;
+  const output = finalResponse.output;
+  if (!output) {
+    throw new Error("Vertex AI did not return valid assistant_chat output.");
+  }
+
+  return assistantChatResultSchema.parse(output);
+}
+
+async function generateStructuredWithVertex<TSchema extends z.ZodTypeAny>(
+  system: string,
+  prompt: string,
+  schema: TSchema
+): Promise<z.infer<TSchema>> {
+  const response = await genkitAI.generate<TSchema, z.ZodTypeAny>({
+    model: configuredVertexModel(),
+    system,
+    prompt,
+    output: { schema },
+    config: defaultGenerationConfig()
+  });
+  const output = response.output;
+  if (!output) {
+    throw new Error("Vertex AI did not return valid structured output.");
+  }
+
+  return schema.parse(output);
+}
+
+function workflowPrompt(workflow: string, payload: unknown, context?: unknown): string {
+  return [
+    `Workflow: ${workflow}`,
+    "Use the request payload and server-loaded context below.",
+    "Return only the structured output requested by this workflow.",
+    "Request payload:",
+    safeJSON(payload),
+    context === undefined ? "" : "Server-loaded Firestore context:",
+    context === undefined ? "" : safeJSON(context)
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function safeJSON(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
 
 function buildAssistantStubResult(message: string, goalCount: number, plannerBlockCount: number): AssistantChatResult {
   if (asksAssistantIdentity(message)) {
