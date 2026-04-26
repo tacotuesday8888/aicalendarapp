@@ -96,6 +96,7 @@ final class AppContainer {
         UserService.shared.databaseService = databaseService
         GoalService.shared.databaseService = databaseService
         GoalService.shared.backendFunctionService = backendFunctionService
+        GoalService.shared.aiBackendService = aiBackendService
         PlannerService.shared.databaseService = databaseService
         CalendarSyncService.shared.databaseService = databaseService
         StudySessionService.shared.databaseService = databaseService

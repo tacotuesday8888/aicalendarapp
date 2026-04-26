@@ -4,7 +4,7 @@ import { HttpsError, onRequest } from "firebase-functions/v2/https";
 import type { Request, Response } from "express";
 
 import { loadAssistantWorkflowContext, loadGoalPlanWorkflowContext } from "./context.js";
-import { storeReviewDraft } from "./drafts.js";
+import { storeGoalPlanReviewDraft, storeReviewDraft } from "./drafts.js";
 import {
   assistantChatFlow,
   goalPlanGenerationFlow,
@@ -93,6 +93,9 @@ async function runAIWorkflow(userID: string, request: AIRunRequest): Promise<AIR
       const context = await loadGoalPlanWorkflowContext(userID, request.payload);
       const result = await goalPlanGenerationFlow({ userID, payload: request.payload, context });
       const draftID = await storeReviewDraft(userID, request.workflow, result);
+      if (draftID) {
+        await storeGoalPlanReviewDraft(userID, request.payload, result, draftID);
+      }
       return { workflow: request.workflow, result, draftID };
     }
     case "vibe_feedback": {

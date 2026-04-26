@@ -31,6 +31,7 @@ final class GoalService: GoalServicing {
 
     var databaseService: DatabaseServicing?
     var backendFunctionService: BackendFunctionServicing?
+    var aiBackendService: AIBackendServicing?
 
     func observeGoals(for userID: String) -> AsyncThrowingStream<[Goal], Error> {
         databaseService?.observeAll(Goal.self, from: .goals, userID: userID) ?? AsyncThrowingStream { continuation in
@@ -59,9 +60,47 @@ final class GoalService: GoalServicing {
     }
 
     func generatePlan(for goal: Goal, timelineWeeks: Int, userID: String) async throws -> GoalPlanDraft {
-        try await requiredBackendFunctionService(backendFunctionService).generateGoalPlan(
+        if let aiBackendService {
+            let response = try await aiBackendService.run(
+                workflow: .goalPlanGeneration,
+                payload: AIGoalPlanPayload(
+                    goalID: goal.id,
+                    goal: AIGoalDetails(goal: goal),
+                    timelineWeeks: timelineWeeks,
+                    startDate: ISO8601DateFormatter.appJSON.string(from: .now),
+                    timezone: TimeZone.current.identifier
+                ),
+                decode: AIGoalPlanResult.self
+            )
+
+            return GoalPlanDraft(
+                id: response.draftID ?? UUID().uuidString,
+                goalID: goal.id,
+                summary: response.result.summary,
+                suggestedTimelineWeeks: timelineWeeks,
+                checkpoints: response.result.milestones.map { milestone in
+                    GoalCheckpoint(
+                        title: milestone.title,
+                        dueDate: Self.parseISODate(milestone.dueDate) ?? .now
+                    )
+                },
+                nextActions: response.result.nextActions.map { action in
+                    GoalStep(title: action.title, isComplete: false)
+                }
+            )
+        }
+
+        return try await requiredBackendFunctionService(backendFunctionService).generateGoalPlan(
             GoalPlanRequestPayload(userID: userID, goal: goal, timelineWeeks: timelineWeeks)
         )
+    }
+
+    private static func parseISODate(_ value: String) -> Date? {
+        if let date = ISO8601DateFormatter.appJSON.date(from: value) {
+            return date
+        }
+
+        return ISO8601DateFormatter().date(from: value)
     }
 }
 
