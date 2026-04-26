@@ -6,6 +6,7 @@
   },
   "main": "lib/index.js",
   "scripts": {
+    "ai:smoke": "tsx scripts/aiSmokeTest.ts",
     "build": "tsc -p tsconfig.json",
     "genkit:ui": "genkit start -- npx tsx --watch src/index.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
