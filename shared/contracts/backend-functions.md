@@ -6,6 +6,13 @@ The iOS app sends `POST` JSON requests to the Firebase Functions base URL in `AP
 
 ## Authenticated JSON endpoints
 
+- `ai/run`
+  - Input: `workflow`, `payload`
+  - Output: `{ workflow, result, draftID }`
+  - Ownership: server verifies Firebase Auth, loads Firestore context, runs the selected Genkit workflow, validates structured output, logs usage, and stores review drafts where needed
+  - Supported workflows: `assistant_chat`, `goal_plan_generation`, `vibe_feedback`, `syllabus_import`
+  - Streaming: `assistant_chat` can return Server-Sent Events when the request accepts `text/event-stream`; other workflows return normal JSON
+
 - `assistantRespond`
   - Input: `userID`, `message`, `snapshot`, `goals`
   - Output: `AssistantThread`
@@ -74,6 +81,8 @@ The iOS app sends `POST` JSON requests to the Firebase Functions base URL in `AP
 ## Server-owned collections
 
 - `assistantThreads`
+- `aiDrafts`
+- `aiUsage`
 - `goalPlans`
 - `imports`
 - `subscriptions`

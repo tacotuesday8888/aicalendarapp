@@ -35,4 +35,4 @@
 
 ## AI baseline
 
-The backend uses a low-cost provider abstraction. `Gemma` is the first model candidate, but the iOS app depends only on stable function contracts and never talks to model providers directly.
+The v1 AI backend uses Firebase Cloud Functions + Genkit. The app calls a Firebase Functions HTTP route, the server verifies the Firebase ID token, loads Firestore context, selects the workflow prompt, validates structured output, and returns JSON. Stub Genkit flows are used first; Vertex AI Gemini is the intended real provider after the stub path is proven.

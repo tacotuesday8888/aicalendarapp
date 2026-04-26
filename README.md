@@ -7,7 +7,7 @@ AI Efficiency Calendar App is an iPhone-first SwiftUI planning app for students.
 - `aicalendarapp/` - SwiftUI iOS app source, features, services, design system, and app resources.
 - `aicalendarapp.xcodeproj/` - Xcode project.
 - `backend/functions/` - Firebase Cloud Functions for privileged server work.
-- `backend/ai-service/` - Optional FastAPI AI service prototype.
+- `backend/ai-service/` - Inactive FastAPI AI service prototype retained for reference; v1 AI uses Firebase Functions + Genkit.
 - `backend/firestore/` - Firestore rules and indexes.
 - `backend/storage/` - Firebase Storage rules.
 - `shared/` - Shared contracts and analytics event names.
