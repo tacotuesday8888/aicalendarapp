@@ -5,6 +5,7 @@ import type {
   AssistantChatResult,
   GoalPlanGenerationPayload,
   GoalPlanGenerationResult,
+  SyllabusImportPayload,
   SyllabusImportResult
 } from "./schemas.js";
 
@@ -127,6 +128,55 @@ export async function storeAssistantChatReviewState(
   ]);
 }
 
+export async function storeSyllabusImportReviewJob(
+  userID: string,
+  payload: SyllabusImportPayload,
+  result: SyllabusImportResult
+): Promise<string> {
+  const importRef = userScopedCollection(userID, "imports").doc();
+  const sourceName = payload.sourceName?.trim() || "syllabus-import";
+  const courseRecords = result.courses.map((course, index) => {
+    const idBase = sanitizeID(course.name) ?? "ai-course";
+    const id = `${idBase}-${index + 1}`;
+    return {
+      id,
+      title: course.name,
+      instructor: course.instructor ?? "",
+      meetingDays: [],
+      colorHex: "#2F6BFF"
+    };
+  });
+  const courseIDs = courseRecords.map((course) => course.id);
+  const assignmentRecords = result.courses.flatMap((course, courseIndex) => {
+    const courseID = courseIDs[courseIndex] ?? null;
+    return course.assignments.map((assignment, assignmentIndex) => ({
+      id: `${courseID ?? `ai-course-${courseIndex + 1}`}-assignment-${assignmentIndex + 1}`,
+      courseID,
+      title: assignment.title,
+      dueDate: validISODateOrNull(assignment.dueDate),
+      notes: syllabusAssignmentNotes(assignment),
+      isComplete: false
+    }));
+  });
+  const warnings = result.warnings.map((warning) =>
+    warning.sourceText ? `${warning.message} Source: ${warning.sourceText}` : warning.message
+  );
+
+  await importRef.set({
+    id: importRef.id,
+    sourceName,
+    status: "completed",
+    extractedCourses: courseRecords,
+    extractedAssignments: assignmentRecords,
+    warnings,
+    uploadedFilePath: payload.uploadedFilePath ?? null,
+    createdAt: serverTimestamp(),
+    committedAt: null
+  });
+
+  return importRef.id;
+}
+
 function assistantDraftArtifactID(draftID: string | null, timestamp: number, index: number): string {
   const baseID = draftID ?? `assistant-${timestamp}`;
   return `${baseID}-action-${index + 1}`;
@@ -148,4 +198,26 @@ function assistantDraftKind(actionType: string): AssistantDraftRecord["kind"] {
   }
 
   return "plannerAdjustment";
+}
+
+function validISODateOrNull(value: string | null): string | null {
+  if (!value || Number.isNaN(Date.parse(value))) {
+    return null;
+  }
+
+  return new Date(value).toISOString();
+}
+
+function syllabusAssignmentNotes(assignment: SyllabusImportResult["courses"][number]["assignments"][number]): string {
+  const parts = ["Imported from syllabus review.", `Confidence: ${assignment.confidence}.`];
+  if (assignment.type) {
+    parts.push(`Type: ${assignment.type}.`);
+  }
+  parts.push(`Source: ${assignment.sourceText}`);
+  return parts.join(" ");
+}
+
+function sanitizeID(rawID: string): string | null {
+  const trimmed = rawID.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return trimmed || null;
 }

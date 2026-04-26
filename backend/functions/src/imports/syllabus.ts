@@ -23,7 +23,7 @@ type ParsedImport = {
     id: string;
     courseID: string;
     title: string;
-    dueDate: string;
+    dueDate: string | null;
     notes: string;
     isComplete: boolean;
   }>;
@@ -171,7 +171,7 @@ async function parseSource(rawText: string): Promise<ParsedImport> {
       user: JSON.stringify(
         {
           instruction:
-            "Parse the syllabus text and return JSON with: courses [{ id, title, instructor, meetingDays, colorHex }], assignments [{ id, courseID, title, dueDate ISO8601, notes, isComplete }], warnings [string]. Use '#2F6BFF' as a safe default colorHex when none is obvious. Return ONLY valid JSON.",
+            "Parse the syllabus text and return JSON with: courses [{ id, title, instructor, meetingDays, colorHex }], assignments [{ id, courseID, title, dueDate ISO8601 or null if not explicit, notes, isComplete }], warnings [string]. Use '#2F6BFF' as a safe default colorHex when none is obvious. Return ONLY valid JSON.",
           syllabusText: rawText
         },
         null,
@@ -221,7 +221,7 @@ function sanitizeParsedImport(parsed: ParsedImport, rawText: string): ParsedImpo
         .map((assignment, index) => {
           const dueDate = assignment.dueDate && !Number.isNaN(Date.parse(assignment.dueDate))
             ? new Date(assignment.dueDate).toISOString()
-            : fallbackDueDate(index);
+            : null;
           const title = assignment.title?.trim();
           if (!title) {
             return null;
@@ -275,7 +275,7 @@ function parseSourceFallback(rawText: string): ParsedImport {
       id: `assignment-${index + 1}`,
       courseID: "imported-course",
       title: line,
-      dueDate: fallbackDueDate(index),
+      dueDate: null,
       notes: "Imported from syllabus parsing.",
       isComplete: false
     }));
@@ -285,12 +285,6 @@ function parseSourceFallback(rawText: string): ParsedImport {
   }
 
   return { courses, assignments, warnings };
-}
-
-function fallbackDueDate(index: number): string {
-  const dueDate = new Date();
-  dueDate.setDate(dueDate.getDate() + (index + 1) * 7);
-  return dueDate.toISOString();
 }
 
 function sanitizeID(rawID: unknown): string | null {

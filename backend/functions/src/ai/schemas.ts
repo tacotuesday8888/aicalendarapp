@@ -74,7 +74,9 @@ export const vibeFeedbackResultSchema = z.object({
 export const syllabusImportPayloadSchema = z.object({
   extractedText: z.string().trim().min(1),
   currentDate: z.string().trim().optional().nullable(),
-  timezone: z.string().trim().min(1)
+  timezone: z.string().trim().min(1),
+  sourceName: z.string().trim().optional().nullable(),
+  uploadedFilePath: z.string().trim().optional().nullable()
 });
 
 export const syllabusAssignmentSchema = z.object({

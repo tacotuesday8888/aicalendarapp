@@ -19,6 +19,13 @@ private func requiredBackendFunctionService(_ backendFunctionService: BackendFun
     return backendFunctionService
 }
 
+private func requiredAIBackendService(_ aiBackendService: AIBackendServicing?) throws -> AIBackendServicing {
+    guard let aiBackendService else {
+        throw AppError.missingConfiguration("aiBackendService")
+    }
+    return aiBackendService
+}
+
 private func requiredStorageService(_ storageService: StorageServicing?) throws -> StorageServicing {
     guard let storageService else {
         throw AppError.missingConfiguration("storageService")
@@ -506,6 +513,7 @@ final class SyllabusImportService: SyllabusImportServicing {
     var databaseService: DatabaseServicing?
     var storageService: StorageServicing?
     var backendFunctionService: BackendFunctionServicing?
+    var aiBackendService: AIBackendServicing?
 
     func observeImports(for userID: String) -> AsyncThrowingStream<[ImportJob], Error> {
         databaseService?.observeAll(ImportJob.self, from: .imports, userID: userID) ?? AsyncThrowingStream { continuation in
@@ -514,7 +522,11 @@ final class SyllabusImportService: SyllabusImportServicing {
     }
 
     func importText(_ text: String, for userID: String) async throws -> ImportJob {
-        try await requiredBackendFunctionService(backendFunctionService).importSyllabusText(
+        if aiBackendService != nil {
+            return try await importWithAI(text, sourceName: "text-import", uploadedFilePath: nil, for: userID)
+        }
+
+        return try await requiredBackendFunctionService(backendFunctionService).importSyllabusText(
             ImportTextRequestPayload(userID: userID, text: text)
         )
     }
@@ -535,6 +547,16 @@ final class SyllabusImportService: SyllabusImportServicing {
             path: "users/\(userID)/imports/\(UUID().uuidString)-\(fileURL.lastPathComponent)",
             contentType: contentType
         )
+
+        if aiBackendService != nil {
+            return try await importWithAI(
+                extractedText,
+                sourceName: fileURL.lastPathComponent,
+                uploadedFilePath: remotePath,
+                for: userID
+            )
+        }
+
         return try await requiredBackendFunctionService(backendFunctionService).importSyllabusFile(
             ImportFileRequestPayload(userID: userID, sourceName: fileURL.lastPathComponent, uploadedPath: remotePath, extractedText: extractedText)
         )
@@ -586,6 +608,109 @@ final class SyllabusImportService: SyllabusImportServicing {
 
         throw AppError.network(description: "We could not extract readable text from this file. Import a plain text file or a searchable PDF.")
     }
+
+    private func importWithAI(
+        _ extractedText: String,
+        sourceName: String,
+        uploadedFilePath: String?,
+        for userID: String
+    ) async throws -> ImportJob {
+        let response = try await requiredAIBackendService(aiBackendService).run(
+            workflow: .syllabusImport,
+            payload: AISyllabusImportPayload(
+                extractedText: extractedText,
+                currentDate: ISO8601DateFormatter.appJSON.string(from: .now),
+                timezone: TimeZone.current.identifier,
+                sourceName: sourceName,
+                uploadedFilePath: uploadedFilePath
+            ),
+            decode: AISyllabusImportResult.self
+        )
+
+        if let draftID = response.draftID,
+           let databaseService,
+           let job = try? await databaseService.fetch(ImportJob.self, from: .imports, id: draftID, userID: userID) {
+            return job
+        }
+
+        return Self.localImportJob(
+            from: response,
+            sourceName: sourceName,
+            uploadedFilePath: uploadedFilePath
+        )
+    }
+
+    private static func localImportJob(
+        from response: AIWorkflowRunResponse<AISyllabusImportResult>,
+        sourceName: String,
+        uploadedFilePath: String?
+    ) -> ImportJob {
+        let coursePairs = response.result.courses.enumerated().map { index, course in
+            (
+                id: "ai-course-\(index + 1)",
+                course: Course(
+                    id: "ai-course-\(index + 1)",
+                    title: course.name,
+                    instructor: course.instructor ?? "",
+                    meetingDays: [],
+                    colorHex: "#2F6BFF"
+                ),
+                source: course
+            )
+        }
+
+        let courses = coursePairs.map(\.course)
+        let assignments = coursePairs.flatMap { pair in
+            pair.source.assignments.enumerated().map { index, assignment in
+                Assignment(
+                    id: "\(pair.id)-assignment-\(index + 1)",
+                    courseID: pair.id,
+                    title: assignment.title,
+                    dueDate: parseISODate(assignment.dueDate),
+                    notes: syllabusAssignmentNotes(for: assignment),
+                    isComplete: false
+                )
+            }
+        }
+
+        let warnings = response.result.warnings.map { warning in
+            if let sourceText = warning.sourceText, !sourceText.isEmpty {
+                return "\(warning.message) Source: \(sourceText)"
+            }
+            return warning.message
+        }
+
+        return ImportJob(
+            id: response.draftID ?? UUID().uuidString,
+            sourceName: sourceName,
+            status: .completed,
+            extractedCourses: courses,
+            extractedAssignments: assignments,
+            warnings: warnings,
+            uploadedFilePath: uploadedFilePath,
+            createdAt: .now,
+            committedAt: nil
+        )
+    }
+
+    private static func parseISODate(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+
+        if let date = ISO8601DateFormatter.appJSON.date(from: value) {
+            return date
+        }
+
+        return ISO8601DateFormatter().date(from: value)
+    }
+
+    private static func syllabusAssignmentNotes(for assignment: AISyllabusAssignment) -> String {
+        var parts = ["Imported from syllabus review.", "Confidence: \(assignment.confidence)."]
+        if let type = assignment.type, !type.isEmpty {
+            parts.append("Type: \(type).")
+        }
+        parts.append("Source: \(assignment.sourceText)")
+        return parts.joined(separator: " ")
+    }
 }
 
 private actor PlannerAccumulator {
@@ -608,7 +733,7 @@ private actor PlannerAccumulator {
     }
 
     func updateAssignments(_ assignments: [Assignment]) {
-        self.assignments = assignments.sorted(by: { $0.dueDate < $1.dueDate })
+        self.assignments = assignments.sorted(by: { ($0.dueDate ?? .distantFuture) < ($1.dueDate ?? .distantFuture) })
         didLoadAssignments = true
     }
 

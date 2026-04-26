@@ -4,7 +4,12 @@ import { HttpsError, onRequest } from "firebase-functions/v2/https";
 import type { Request, Response } from "express";
 
 import { loadAssistantWorkflowContext, loadGoalPlanWorkflowContext } from "./context.js";
-import { storeAssistantChatReviewState, storeGoalPlanReviewDraft, storeReviewDraft } from "./drafts.js";
+import {
+  storeAssistantChatReviewState,
+  storeGoalPlanReviewDraft,
+  storeReviewDraft,
+  storeSyllabusImportReviewJob
+} from "./drafts.js";
 import {
   assistantChatFlow,
   goalPlanGenerationFlow,
@@ -105,7 +110,7 @@ async function runAIWorkflow(userID: string, request: AIRunRequest): Promise<AIR
     }
     case "syllabus_import": {
       const result = await syllabusImportFlow({ userID, payload: request.payload });
-      const draftID = await storeReviewDraft(userID, request.workflow, result);
+      const draftID = await storeSyllabusImportReviewJob(userID, request.payload, result);
       return { workflow: request.workflow, result, draftID };
     }
   }

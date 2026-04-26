@@ -92,7 +92,7 @@ struct ImportReviewSheet: View {
                             Assignment(
                                 courseID: draftJob.extractedCourses.first?.id,
                                 title: "New assignment",
-                                dueDate: .now,
+                                dueDate: nil,
                                 notes: "",
                                 isComplete: false
                             )
@@ -213,7 +213,23 @@ private struct AssignmentReviewEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("Assignment title", text: $assignment.title)
-            DatePicker("Due date", selection: $assignment.dueDate, displayedComponents: [.date, .hourAndMinute])
+
+            if assignment.dueDate == nil {
+                HStack {
+                    Text("No due date")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Add due date") {
+                        assignment.dueDate = .now
+                    }
+                }
+            } else {
+                DatePicker("Due date", selection: dueDateBinding, displayedComponents: [.date, .hourAndMinute])
+                Button("Remove due date", role: .destructive) {
+                    assignment.dueDate = nil
+                }
+                .buttonStyle(.borderless)
+            }
 
             if !availableCourses.isEmpty {
                 Picker("Course", selection: Binding(
@@ -229,5 +245,12 @@ private struct AssignmentReviewEditor: View {
             TextField("Notes", text: $assignment.notes, axis: .vertical)
         }
         .padding(.vertical, 4)
+    }
+
+    private var dueDateBinding: Binding<Date> {
+        Binding(
+            get: { assignment.dueDate ?? .now },
+            set: { assignment.dueDate = $0 }
+        )
     }
 }

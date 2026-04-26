@@ -294,7 +294,7 @@ struct Assignment: Codable, Identifiable, Hashable, Sendable {
     var id: String = UUID().uuidString
     var courseID: String?
     var title: String
-    var dueDate: Date
+    var dueDate: Date?
     var notes: String
     var isComplete: Bool
 }

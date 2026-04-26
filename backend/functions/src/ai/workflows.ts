@@ -157,10 +157,12 @@ export const syllabusImportFlow = genkitAI.defineFlow(
   async ({ payload }): Promise<SyllabusImportResult> => {
     void SYLLABUS_IMPORT_SYSTEM_PROMPT;
 
-    const firstUsefulLine = payload.extractedText
+    const usefulLines = payload.extractedText
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .find(Boolean);
+      .filter(Boolean);
+    const firstUsefulLine = usefulLines[0];
+    const assignmentLines = usefulLines.slice(1, 6);
 
     return syllabusImportResultSchema.parse({
       courses: firstUsefulLine
@@ -168,7 +170,13 @@ export const syllabusImportFlow = genkitAI.defineFlow(
             {
               name: firstUsefulLine,
               instructor: null,
-              assignments: []
+              assignments: assignmentLines.map((line) => ({
+                title: line,
+                type: null,
+                dueDate: null,
+                confidence: "low",
+                sourceText: line
+              }))
             }
           ]
         : [],

@@ -99,6 +99,8 @@ struct AISyllabusImportPayload: Codable, Sendable {
     var extractedText: String
     var currentDate: String?
     var timezone: String
+    var sourceName: String?
+    var uploadedFilePath: String?
 }
 
 struct AISyllabusAssignment: Codable, Hashable, Sendable {

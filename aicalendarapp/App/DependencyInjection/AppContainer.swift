@@ -107,6 +107,7 @@ final class AppContainer {
         SyllabusImportService.shared.databaseService = databaseService
         SyllabusImportService.shared.storageService = storageService
         SyllabusImportService.shared.backendFunctionService = backendFunctionService
+        SyllabusImportService.shared.aiBackendService = aiBackendService
         BackendFunctionService.shared.networkService = networkService
         BackendFunctionService.shared.databaseService = databaseService
         BackendFunctionService.shared.storageService = storageService
