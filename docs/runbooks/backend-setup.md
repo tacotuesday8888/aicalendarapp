@@ -7,12 +7,15 @@
 3. Install dependencies in `backend/functions`.
 4. Copy `aicalendarapp/Resources/Config/Secrets.template.xcconfig` to `aicalendarapp/Resources/Config/Secrets.xcconfig` for local overrides and fill in:
    - `API_BASE_URL`
+   - `AI_API_BASE_URL`
    - `REVENUECAT_API_KEY`
    - `SUPERWALL_API_KEY`
    - `GOOGLE_CLIENT_ID`
    - `GOOGLE_REVERSED_CLIENT_ID`
 5. Add a real `GoogleService-Info.plist` from the Firebase console to `aicalendarapp/Resources/Config/` for local Firebase initialization, and make sure it matches the registered iOS app bundle ID.
 6. Set `API_BASE_URL` to your Firebase Functions root, for example:
+   - `https://us-central1-your-project-id.cloudfunctions.net/`
+   Set `AI_API_BASE_URL` to the same Firebase Functions root for the Genkit AI router:
    - `https://us-central1-your-project-id.cloudfunctions.net/`
 7. Enable required Google Cloud APIs before first backend deploy:
    - Cloud Functions API
@@ -22,19 +25,11 @@
 8. Set function secrets with the Firebase CLI before deploying:
    - `npx -y firebase-tools@latest functions:secrets:set REVENUECAT_WEBHOOK_SECRET`
    - `npx -y firebase-tools@latest functions:secrets:set REVENUECAT_SECRET_API_KEY`
-9. Provide the AI runtime configuration values required by `backend/functions/src/ai/provider.ts` in your chosen Functions runtime configuration flow:
-   - `AI_PROVIDER`
-   - `AI_MODEL`
-   - `AI_ENDPOINT`
-   - `AI_API_KEY`
+9. AI v1 runs through `backend/functions/src/ai/router.ts` with Genkit stub flows. No LLM API key is required until Vertex AI Gemini is enabled.
 10. Deploy Firestore and Storage rules before enabling live client traffic.
 
 ## Required backend configuration
 
-- `AI_PROVIDER`
-- `AI_MODEL`
-- `AI_ENDPOINT`
-- `AI_API_KEY`
 - `REVENUECAT_WEBHOOK_SECRET`
 - `REVENUECAT_SECRET_API_KEY`
 
