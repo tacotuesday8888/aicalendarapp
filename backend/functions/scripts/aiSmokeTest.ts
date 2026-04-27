@@ -12,10 +12,21 @@ import {
   syllabusImportResultSchema,
   vibeFeedbackResultSchema
 } from "../src/ai/schemas.js";
+import {
+  ASSISTANT_CHAT_SYSTEM_PROMPT,
+  BASE_SYSTEM_PROMPT,
+  GOAL_PLAN_GENERATION_SYSTEM_PROMPT,
+  SCHEDULE_PLANNER_GENERATION_SYSTEM_PROMPT,
+  STUDY_SESSION_SUPPORT_SYSTEM_PROMPT,
+  SYLLABUS_IMPORT_SYSTEM_PROMPT,
+  VIBE_FEEDBACK_SYSTEM_PROMPT
+} from "../src/ai/prompts/index.js";
 
 process.env.AI_PROVIDER = "stub";
 
 async function runSmokeTest() {
+  assertPromptContracts();
+
   const assistantInput = {
     userID: "smoke-test-user",
     payload: {
@@ -117,6 +128,46 @@ async function runSmokeTest() {
   assert.equal(syllabusResult.courses[0]?.assignments[0]?.dueDate, null);
 
   console.log("AI smoke test passed.");
+}
+
+function assertPromptContracts() {
+  const identityResponse = "I’m your in-app productivity assistant, here to help you plan, study, and stay organized.";
+  const providerNames = [
+    "ChatGPT",
+    "Claude",
+    "Gemini",
+    "Qwen",
+    "Gemma",
+    "Kimi",
+    "DeepSeek",
+    "OpenAI",
+    "Anthropic",
+    "Google",
+    "Alibaba"
+  ];
+  const prompts = [
+    ["assistant_chat", ASSISTANT_CHAT_SYSTEM_PROMPT],
+    ["goal_plan_generation", GOAL_PLAN_GENERATION_SYSTEM_PROMPT],
+    ["vibe_feedback", VIBE_FEEDBACK_SYSTEM_PROMPT],
+    ["syllabus_import", SYLLABUS_IMPORT_SYSTEM_PROMPT],
+    ["schedule_planner_generation", SCHEDULE_PLANNER_GENERATION_SYSTEM_PROMPT],
+    ["study_session_support", STUDY_SESSION_SUPPORT_SYSTEM_PROMPT]
+  ] as const;
+
+  assert.ok(BASE_SYSTEM_PROMPT.includes(identityResponse), "Base prompt must define the exact identity response.");
+  for (const providerName of providerNames) {
+    assert.ok(
+      BASE_SYSTEM_PROMPT.includes(providerName),
+      `Base prompt must explicitly prohibit revealing ${providerName}.`
+    );
+  }
+
+  for (const [featureName, prompt] of prompts) {
+    assert.ok(prompt.includes(BASE_SYSTEM_PROMPT), `${featureName} prompt must include the base prompt.`);
+    assert.ok(prompt.includes("Purpose:"), `${featureName} prompt must define purpose.`);
+    assert.ok(prompt.includes("Allowed scope:"), `${featureName} prompt must define allowed scope.`);
+    assert.ok(prompt.includes("Output format"), `${featureName} prompt must define output expectations.`);
+  }
 }
 
 runSmokeTest().catch((error) => {
