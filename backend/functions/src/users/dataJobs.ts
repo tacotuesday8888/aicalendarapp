@@ -21,6 +21,7 @@ const exportCollections = [
   "assistantThreads",
   "imports",
   "subscriptions",
+  "aiUsage",
   "aiUsageLogs",
   "assistantDraftArtifacts"
 ];
