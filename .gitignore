@@ -4,6 +4,7 @@
 DerivedData/
 xcuserdata/
 .gemini/
+.firebase/
 
 backend/functions/lib/
 backend/functions/node_modules/
