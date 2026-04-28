@@ -6,7 +6,7 @@ import { ZodError, type ZodType } from "zod";
 
 import { verifyAppCheckRequest } from "./appCheck.js";
 
-type AuthenticatedHandler<T> = (context: { authUID: string; data: T }) => Promise<unknown>;
+type AuthenticatedHandler<T> = (context: { authUID: string; data: T; request: Request }) => Promise<unknown>;
 
 export function onAuthenticatedJsonRequest<T>(
   schema: ZodType<T>,
@@ -23,7 +23,7 @@ export function onAuthenticatedJsonRequest<T>(
       await verifyAppCheckRequest(request, request.path || request.originalUrl || "authenticated-json-request");
       const authUID = await verifyBearerToken(request);
       const data = schema.parse(parseBody(request));
-      const result = await handler({ authUID, data });
+      const result = await handler({ authUID, data, request });
       response.status(200).json(result);
     } catch (error) {
       respondWithError(response, error);

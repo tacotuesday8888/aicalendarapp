@@ -14,6 +14,7 @@ import { requireMatchingUser } from "../shared/context.js";
 import { serverTimestamp, userScopedCollection } from "../shared/firestore.js";
 import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
+import { logLegacyAIEndpointUse } from "../shared/legacyInstrumentation.js";
 import { AI_DISABLED_MESSAGE, createAIProvider, isAIDisabledResponse } from "./provider.js";
 import {
   buildAssistantSystemPrompt,
@@ -43,7 +44,8 @@ type GoalPlanCompletion = {
   }>;
 };
 
-export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchema, async ({ authUID, data }) => {
+export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchema, async ({ authUID, data, request }) => {
+  logLegacyAIEndpointUse("assistantRespond", authUID, request);
   const userID = requireMatchingUser(authUID, data.userID);
   await authorizeAndReserveAIUsage(userID, "assistant_chat");
 
@@ -52,7 +54,8 @@ export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchem
   return { thread };
 }, aiFunctionOptions);
 
-export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema, async ({ authUID, data }) => {
+export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema, async ({ authUID, data, request }) => {
+  logLegacyAIEndpointUse("generateGoalPlan", authUID, request);
   const userID = requireMatchingUser(authUID, data.userID);
   await authorizeAndReserveAIUsage(userID, "goal_plan_generation");
 
@@ -61,7 +64,8 @@ export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema
   return draft;
 }, aiFunctionOptions);
 
-export const generateVibeFeedback = onAuthenticatedJsonRequest(vibeFeedbackRequestSchema, async ({ authUID, data }) => {
+export const generateVibeFeedback = onAuthenticatedJsonRequest(vibeFeedbackRequestSchema, async ({ authUID, data, request }) => {
+  logLegacyAIEndpointUse("generateVibeFeedback", authUID, request);
   const userID = requireMatchingUser(authUID, data.userID);
   await authorizeAndReserveAIUsage(userID, "vibe_feedback");
 
@@ -71,7 +75,8 @@ export const generateVibeFeedback = onAuthenticatedJsonRequest(vibeFeedbackReque
   return { feedback };
 }, aiFunctionOptions);
 
-export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCommitSchema, async ({ authUID, data }) => {
+export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCommitSchema, async ({ authUID, data, request }) => {
+  logLegacyAIEndpointUse("commitAssistantDraft", authUID, request);
   const userID = requireMatchingUser(authUID, data.userID);
 
   await confirmDraftArtifact(userID, data);

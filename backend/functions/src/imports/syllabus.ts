@@ -12,6 +12,7 @@ import { requireMatchingUser } from "../shared/context.js";
 import { db, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
 import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
+import { logLegacyAIEndpointUse } from "../shared/legacyInstrumentation.js";
 import { createAIProvider, isAIDisabledResponse } from "../ai/provider.js";
 import { authorizeAndReserveAIUsage, enforceAIPremiumAccess, logAIUsage } from "../ai/usage.js";
 
@@ -34,14 +35,16 @@ type ParsedImport = {
   warnings: string[];
 };
 
-export const importSyllabusText = onAuthenticatedJsonRequest(importTextRequestSchema, async ({ authUID, data }) => {
+export const importSyllabusText = onAuthenticatedJsonRequest(importTextRequestSchema, async ({ authUID, data, request }) => {
+  logLegacyAIEndpointUse("importSyllabusText", authUID, request);
   const userID = requireMatchingUser(authUID, data.userID);
   await authorizeAndReserveAIUsage(userID, "syllabus_import");
 
   return createImportJob(userID, data.text, "text-import");
 }, aiFunctionOptions);
 
-export const importSyllabusFile = onAuthenticatedJsonRequest(importFileRequestSchema, async ({ authUID, data }) => {
+export const importSyllabusFile = onAuthenticatedJsonRequest(importFileRequestSchema, async ({ authUID, data, request }) => {
+  logLegacyAIEndpointUse("importSyllabusFile", authUID, request);
   const userID = requireMatchingUser(authUID, data.userID);
   await enforceAIPremiumAccess(userID, "syllabus_import");
 
