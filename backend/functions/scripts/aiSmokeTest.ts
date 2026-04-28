@@ -21,11 +21,18 @@ import {
   SYLLABUS_IMPORT_SYSTEM_PROMPT,
   VIBE_FEEDBACK_SYSTEM_PROMPT
 } from "../src/ai/prompts/index.js";
+import {
+  DEFAULT_FREE_DAILY_LIMIT,
+  DEFAULT_PREMIUM_DAILY_LIMIT,
+  dailyLimitForWorkflow,
+  nextWorkflowCountsForReservation
+} from "../src/ai/usagePolicy.js";
 
 process.env.AI_PROVIDER = "stub";
 
 async function runSmokeTest() {
   assertPromptContracts();
+  assertUsagePolicy();
 
   const assistantInput = {
     userID: "smoke-test-user",
@@ -138,6 +145,33 @@ async function runSmokeTest() {
   assert.equal(syllabusResult.courses[0]?.assignments[0]?.dueDate, null);
 
   console.log("AI smoke test passed.");
+}
+
+function assertUsagePolicy() {
+  assert.equal(dailyLimitForWorkflow("vibe_feedback", "inactive", {}), DEFAULT_FREE_DAILY_LIMIT);
+  assert.equal(dailyLimitForWorkflow("assistant_chat", "active", {}), DEFAULT_PREMIUM_DAILY_LIMIT);
+  assert.equal(
+    dailyLimitForWorkflow("assistant_chat", "active", {
+      AI_PREMIUM_DAILY_LIMIT: "120",
+      AI_DAILY_LIMIT_ASSISTANT_CHAT_ACTIVE: "25"
+    }),
+    25
+  );
+  assert.equal(
+    dailyLimitForWorkflow("vibe_feedback", "inactive", {
+      AI_FREE_DAILY_LIMIT: "30"
+    }),
+    30
+  );
+
+  assert.deepEqual(
+    nextWorkflowCountsForReservation({ assistant_chat: 50, vibe_feedback: 49 }, "vibe_feedback", 50),
+    { assistant_chat: 50, vibe_feedback: 50 }
+  );
+  assert.throws(
+    () => nextWorkflowCountsForReservation({ assistant_chat: 50, vibe_feedback: 1 }, "assistant_chat", 50),
+    /daily AI limit for assistant_chat/
+  );
 }
 
 function assertPromptContracts() {
