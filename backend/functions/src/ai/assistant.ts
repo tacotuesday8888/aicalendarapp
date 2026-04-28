@@ -12,6 +12,7 @@ import {
 } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
 import { serverTimestamp, userScopedCollection } from "../shared/firestore.js";
+import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 import { AI_DISABLED_MESSAGE, createAIProvider, isAIDisabledResponse } from "./provider.js";
 import {
@@ -49,7 +50,7 @@ export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchem
   const thread = await createAssistantThread(userID, data);
   await logAIUsage(userID, "assistant_chat", "success");
   return { thread };
-});
+}, aiFunctionOptions);
 
 export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
@@ -58,7 +59,7 @@ export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema
   const draft = await createGoalPlanDraft(userID, data);
   await logAIUsage(userID, "goal_plan_generation", "success");
   return draft;
-});
+}, aiFunctionOptions);
 
 export const generateVibeFeedback = onAuthenticatedJsonRequest(vibeFeedbackRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
@@ -68,7 +69,7 @@ export const generateVibeFeedback = onAuthenticatedJsonRequest(vibeFeedbackReque
   await logAIUsage(userID, "vibe_feedback", "success");
 
   return { feedback };
-});
+}, aiFunctionOptions);
 
 export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCommitSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);

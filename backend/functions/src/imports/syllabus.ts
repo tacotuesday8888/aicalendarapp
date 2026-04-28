@@ -10,6 +10,7 @@ import {
 } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
 import { db, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
+import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 import { createAIProvider, isAIDisabledResponse } from "../ai/provider.js";
 import { authorizeAndReserveAIUsage, enforceAIPremiumAccess, logAIUsage } from "../ai/usage.js";
@@ -38,7 +39,7 @@ export const importSyllabusText = onAuthenticatedJsonRequest(importTextRequestSc
   await authorizeAndReserveAIUsage(userID, "syllabus_import");
 
   return createImportJob(userID, data.text, "text-import");
-});
+}, aiFunctionOptions);
 
 export const importSyllabusFile = onAuthenticatedJsonRequest(importFileRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
@@ -57,7 +58,7 @@ export const importSyllabusFile = onAuthenticatedJsonRequest(importFileRequestSc
 
   await authorizeAndReserveAIUsage(userID, "syllabus_import");
   return createImportJob(userID, extractedText, data.sourceName, data.uploadedPath ?? null);
-});
+}, aiFunctionOptions);
 
 export const commitImportJob = onAuthenticatedJsonRequest(importCommitSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);

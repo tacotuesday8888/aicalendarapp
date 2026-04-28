@@ -4,6 +4,7 @@ import { HttpsError, onRequest } from "firebase-functions/v2/https";
 import type { Request, Response } from "express";
 
 import { verifyAppCheckRequest } from "../shared/appCheck.js";
+import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { loadAssistantWorkflowContext, loadGoalPlanWorkflowContext } from "./context.js";
 import {
   storeAssistantChatReviewState,
@@ -28,7 +29,7 @@ type AIRunSuccess = {
 
 type AIErrorCode = "invalid_payload" | "unauthorized" | "rate_limited" | "workflow_failed" | "internal_error";
 
-export const ai = onRequest({ timeoutSeconds: 300 }, async (request: Request, response: Response) => {
+export const ai = onRequest(aiFunctionOptions, async (request: Request, response: Response) => {
   if (!isAIRunPath(request)) {
     response.status(404).json({
       error: {

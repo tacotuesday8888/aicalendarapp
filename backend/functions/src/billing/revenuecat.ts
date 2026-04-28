@@ -3,6 +3,7 @@ import { logger } from "firebase-functions/v2";
 import { timingSafeEqual } from "node:crypto";
 
 import { db, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
+import { revenueCatSyncOptions, revenueCatWebhookOptions } from "../shared/functionOptions.js";
 import { userJobRequestSchema } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
@@ -210,11 +211,10 @@ export const syncRevenueCatSubscription = onAuthenticatedJsonRequest(userJobRequ
   );
 
   return { success: true };
-}, {
-  secrets: ["REVENUECAT_SECRET_API_KEY"]
-});
+}, revenueCatSyncOptions);
 
 export const revenueCatWebhook = onRequest({
+  ...revenueCatWebhookOptions,
   secrets: ["REVENUECAT_WEBHOOK_SECRET", "REVENUECAT_SECRET_API_KEY"]
 }, async (request, response) => {
   if (request.method !== "POST") {
