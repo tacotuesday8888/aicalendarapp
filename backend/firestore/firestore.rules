@@ -54,6 +54,16 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /aiUsage/{documentID} {
+        allow read: if isOwner(userID);
+        allow write: if false;
+      }
+
+      match /aiUsageDaily/{documentID} {
+        allow read: if isOwner(userID);
+        allow write: if false;
+      }
+
       match /assistantDraftArtifacts/{documentID} {
         allow read: if isOwner(userID);
         allow write: if false;
