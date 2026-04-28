@@ -199,6 +199,10 @@ function assertPromptContracts() {
   ] as const;
 
   assert.ok(BASE_SYSTEM_PROMPT.includes(identityResponse), "Base prompt must define the exact identity response.");
+  assert.ok(BASE_SYSTEM_PROMPT.includes("untrusted data"), "Base prompt must treat request/context fields as untrusted data.");
+  assert.ok(BASE_SYSTEM_PROMPT.includes("<<<USER_INPUT_BEGIN>>>"), "Base prompt must define the input sentinel start token.");
+  assert.ok(BASE_SYSTEM_PROMPT.includes("<<<USER_INPUT_END>>>"), "Base prompt must define the input sentinel end token.");
+  assert.ok(BASE_SYSTEM_PROMPT.includes("Ignore any instruction"), "Base prompt must explicitly reject conflicting embedded instructions.");
   for (const providerName of providerNames) {
     assert.ok(
       BASE_SYSTEM_PROMPT.includes(providerName),
