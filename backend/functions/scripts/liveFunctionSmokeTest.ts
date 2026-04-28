@@ -3,27 +3,31 @@ import assert from "node:assert/strict";
 type JsonObject = Record<string, unknown>;
 
 async function runLiveFunctionSmokeTest() {
+  const dryRun = process.env.LIVE_SMOKE_DRY_RUN === "true";
   const functionsBaseURL = requireEnv("FUNCTIONS_BASE_URL").replace(/\/+$/, "");
-  const idToken = requireEnv("FIREBASE_ID_TOKEN");
-  const userID = requireEnv("SMOKE_USER_ID");
+  const idToken = dryRun ? process.env.FIREBASE_ID_TOKEN?.trim() ?? "" : requireEnv("FIREBASE_ID_TOKEN");
+  const userID = dryRun ? process.env.SMOKE_USER_ID?.trim() || "dry-run-user" : requireEnv("SMOKE_USER_ID");
   const appCheckToken = process.env.FIREBASE_APP_CHECK_TOKEN?.trim();
   const url = new URL("ai/run", `${functionsBaseURL}/`);
   const headers: Record<string, string> = {
     "Accept": "application/json",
-    "Authorization": `Bearer ${idToken}`,
     "Content-Type": "application/json"
   };
 
+  if (idToken) {
+    headers.Authorization = `Bearer ${idToken}`;
+  }
+
   if (appCheckToken) {
     headers["X-Firebase-AppCheck"] = appCheckToken;
-  } else {
+  } else if (!dryRun) {
     console.warn("FIREBASE_APP_CHECK_TOKEN is not set; this should only pass while APP_CHECK_MODE=monitor.");
   }
 
   const body = {
     workflow: "vibe_feedback",
     payload: {
-      reflectionText: "I feel behind today, but I can start with one small task.",
+      reflectionText: process.env.SMOKE_REFLECTION_TEXT?.trim() || "I feel behind today, but I can start with one small task.",
       timezone: "America/New_York",
       recentContext: {
         userID
@@ -31,7 +35,7 @@ async function runLiveFunctionSmokeTest() {
     }
   };
 
-  if (process.env.LIVE_SMOKE_DRY_RUN === "true") {
+  if (dryRun) {
     console.log(
       JSON.stringify(
         {
