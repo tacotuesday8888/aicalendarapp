@@ -60,7 +60,7 @@ final class NetworkService: NetworkServicing {
                 let statusCode = httpResponse.statusCode
                 guard (200..<300).contains(statusCode) else {
                     let httpError = AppError.network(
-                        description: Self.errorMessage(from: data) ?? "Request failed with status \(statusCode)."
+                        description: Self.errorDescription(from: data, statusCode: statusCode)
                     )
                     if (400..<500).contains(statusCode) { throw httpError }
                     lastError = httpError
@@ -86,31 +86,36 @@ final class NetworkService: NetworkServicing {
         throw AppError.wrap(lastError ?? AppError.network(description: "Request failed."), fallback: "Request failed.")
     }
 
-    nonisolated private static func errorMessage(from data: Data) -> String? {
+    nonisolated private static func errorDescription(from data: Data, statusCode: Int) -> String {
+        guard let code = errorCode(from: data) else {
+            return "Request failed with status \(statusCode)."
+        }
+
+        return "Request failed with status \(statusCode) (\(code))."
+    }
+
+    nonisolated private static func errorCode(from data: Data) -> String? {
         guard !data.isEmpty else { return nil }
 
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let error = object["error"] as? String, !error.isEmpty {
-                return error
-            }
-
             if let error = object["error"] as? [String: Any],
-               let message = error["message"] as? String,
-               !message.isEmpty
+               let code = error["code"] as? String,
+               isSafeErrorCode(code)
             {
-                return message
+                return code
             }
-        }
 
-        if let rawMessage = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !rawMessage.isEmpty,
-           rawMessage.count <= 500
-        {
-            return rawMessage
+            if let code = object["code"] as? String, isSafeErrorCode(code) {
+                return code
+            }
         }
 
         return nil
+    }
+
+    nonisolated private static func isSafeErrorCode(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= 80 else { return false }
+        return value.range(of: #"^[A-Za-z0-9_.-]+$"#, options: .regularExpression) != nil
     }
 
     #if canImport(FirebaseCore) && canImport(FirebaseAuth)

@@ -188,13 +188,41 @@ function respondWithAIError(response: Response, error: unknown) {
   }
 
   const mapped = mapError(error);
-  logger.error("AI workflow failed", { code: mapped.code, error });
+  const logPayload = {
+    code: mapped.code,
+    status: mapped.status,
+    errorName: errorName(error),
+    httpsCode: httpsErrorCode(error),
+    stack: stackFrames(error)
+  };
+  if (mapped.status >= 500) {
+    logger.error("AI workflow failed", logPayload);
+  } else {
+    logger.warn("AI request rejected", logPayload);
+  }
   response.status(mapped.status).json({
     error: {
       code: mapped.code,
       message: mapped.message
     }
   });
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
+function httpsErrorCode(error: unknown): string | null {
+  return error instanceof HttpsError ? error.code : null;
+}
+
+function stackFrames(error: unknown): string | null {
+  if (!(error instanceof Error) || !error.stack) {
+    return null;
+  }
+
+  const frames = error.stack.split("\n").slice(1, 8).map((line) => line.trim()).filter(Boolean);
+  return frames.length ? frames.join("\n") : null;
 }
 
 function mapError(error: unknown): { code: AIErrorCode; status: number; message: string } {
