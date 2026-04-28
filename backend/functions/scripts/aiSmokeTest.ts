@@ -56,6 +56,7 @@ async function runSmokeTest() {
 
   const assistantResult = await assistantChatFlow(assistantInput);
   assistantChatResultSchema.parse(assistantResult);
+  assistantChatResultSchema.parse({ ...assistantResult, degraded: true });
   assert.equal(assistantResult.draftActions.length, 1);
 
   const identityResult = await assistantChatFlow({

@@ -16,6 +16,7 @@ struct AIWorkflowRunResponse<Result: Decodable>: Decodable {
     var workflow: AIWorkflow
     var result: Result
     var draftID: String?
+    var degraded: Bool?
 }
 
 struct AIAssistantChatPayload: Codable, Sendable {

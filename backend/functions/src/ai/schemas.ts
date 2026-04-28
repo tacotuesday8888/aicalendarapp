@@ -26,7 +26,8 @@ export const assistantDraftActionSchema = z.object({
 
 export const assistantChatResultSchema = z.object({
   message: z.string().trim().min(1),
-  draftActions: z.array(assistantDraftActionSchema)
+  draftActions: z.array(assistantDraftActionSchema),
+  degraded: z.boolean().optional()
 });
 
 export const goalDetailsSchema = z.object({
@@ -57,7 +58,8 @@ export const goalNextActionSchema = z.object({
 export const goalPlanGenerationResultSchema = z.object({
   summary: z.string().trim().min(1),
   milestones: z.array(goalMilestoneSchema),
-  nextActions: z.array(goalNextActionSchema).min(3).max(5)
+  nextActions: z.array(goalNextActionSchema).min(3).max(5),
+  degraded: z.boolean().optional()
 });
 
 export const vibeFeedbackPayloadSchema = z.object({
@@ -68,7 +70,8 @@ export const vibeFeedbackPayloadSchema = z.object({
 
 export const vibeFeedbackResultSchema = z.object({
   feedback: z.string().trim().min(1),
-  needs_escalation: z.boolean()
+  needs_escalation: z.boolean(),
+  degraded: z.boolean().optional()
 });
 
 export const syllabusImportPayloadSchema = z.object({
@@ -100,7 +103,8 @@ export const syllabusWarningSchema = z.object({
 
 export const syllabusImportResultSchema = z.object({
   courses: z.array(syllabusCourseSchema),
-  warnings: z.array(syllabusWarningSchema)
+  warnings: z.array(syllabusWarningSchema),
+  degraded: z.boolean().optional()
 });
 
 export const aiRunRequestSchema = z.discriminatedUnion("workflow", [

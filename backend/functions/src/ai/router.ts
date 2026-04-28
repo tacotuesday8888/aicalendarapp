@@ -25,6 +25,7 @@ type AIRunSuccess = {
   workflow: AIWorkflow;
   result: unknown;
   draftID: string | null;
+  degraded?: true;
 };
 
 type AIErrorCode = "invalid_payload" | "unauthorized" | "rate_limited" | "workflow_failed" | "internal_error";
@@ -96,7 +97,7 @@ async function runAIWorkflow(userID: string, request: AIRunRequest): Promise<AIR
       const result = await assistantChatFlow({ userID, payload: request.payload, context });
       const draftID = await storeReviewDraft(userID, request.workflow, result);
       await storeAssistantChatReviewState(userID, request.payload, result, draftID);
-      return { workflow: request.workflow, result, draftID };
+      return withDegradedFlag({ workflow: request.workflow, result, draftID }, result);
     }
     case "goal_plan_generation": {
       const context = await loadGoalPlanWorkflowContext(userID, request.payload);
@@ -105,16 +106,16 @@ async function runAIWorkflow(userID: string, request: AIRunRequest): Promise<AIR
       if (draftID) {
         await storeGoalPlanReviewDraft(userID, request.payload, result, draftID);
       }
-      return { workflow: request.workflow, result, draftID };
+      return withDegradedFlag({ workflow: request.workflow, result, draftID }, result);
     }
     case "vibe_feedback": {
       const result = await vibeFeedbackFlow({ userID, payload: request.payload });
-      return { workflow: request.workflow, result, draftID: null };
+      return withDegradedFlag({ workflow: request.workflow, result, draftID: null }, result);
     }
     case "syllabus_import": {
       const result = await syllabusImportFlow({ userID, payload: request.payload });
       const draftID = await storeSyllabusImportReviewJob(userID, request.payload, result);
-      return { workflow: request.workflow, result, draftID };
+      return withDegradedFlag({ workflow: request.workflow, result, draftID }, result);
     }
   }
 }
@@ -137,7 +138,7 @@ async function streamAssistantChat(userID: string, request: Extract<AIRunRequest
     const draftID = await storeReviewDraft(userID, request.workflow, result);
     await storeAssistantChatReviewState(userID, request.payload, result, draftID);
     await logAIUsage(userID, request.workflow, "success", { streamed: true });
-    writeSSE(response, "final", { workflow: request.workflow, result, draftID });
+    writeSSE(response, "final", withDegradedFlag({ workflow: request.workflow, result, draftID }, result));
     response.end();
   } catch (error) {
     await logAIUsage(userID, request.workflow, "error", { streamed: true, errorCode: mapError(error).code }).catch(
@@ -160,6 +161,14 @@ function isAIRunPath(request: Request): boolean {
 function wantsStreamingResponse(request: Request): boolean {
   const accept = request.header("Accept") ?? "";
   return accept.includes("text/event-stream") || request.query.stream === "true";
+}
+
+function withDegradedFlag(response: AIRunSuccess, result: unknown): AIRunSuccess {
+  return isDegradedResult(result) ? { ...response, degraded: true } : response;
+}
+
+function isDegradedResult(result: unknown): boolean {
+  return Boolean(result && typeof result === "object" && "degraded" in result && result.degraded === true);
 }
 
 function parseBody(request: Request): unknown {

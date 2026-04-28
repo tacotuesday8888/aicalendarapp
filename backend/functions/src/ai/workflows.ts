@@ -26,6 +26,13 @@ import { crisisSafetyFeedback, reviewVibeFeedbackForCrisis } from "./safety.js";
 const USER_INPUT_BEGIN = "<<<USER_INPUT_BEGIN>>>";
 const USER_INPUT_END = "<<<USER_INPUT_END>>>";
 
+if (getAIProviderMode() === "vertex" && isAIStubFallbackEnabled()) {
+  logger.error("CRITICAL: AI stub fallback is enabled while Vertex AI is the configured provider.", {
+    provider: getAIProviderMode(),
+    degradedResponsesPossible: true
+  });
+}
+
 const assistantWorkflowContextSchema = z.object({
   timezone: z.string(),
   currentScreen: z.string().nullable(),
@@ -64,15 +71,19 @@ export const assistantChatFlow = genkitAI.defineFlow(
       });
     }
 
+    let degraded = false;
     if (getAIProviderMode() === "vertex") {
       try {
         return await generateAssistantChatWithVertex(payload, context, sendChunk);
       } catch (error) {
-        handleProviderFallback("assistant_chat", error);
+        degraded = handleProviderFallback("assistant_chat", error);
       }
     }
 
-    const result = buildAssistantStubResult(payload.message, context.goals.length, context.plannerBlocks.length);
+    const result = {
+      ...buildAssistantStubResult(payload.message, context.goals.length, context.plannerBlocks.length),
+      ...(degraded ? { degraded: true } : {})
+    };
     for (const chunk of chunkText(result.message)) {
       sendChunk(chunk);
     }
@@ -92,6 +103,7 @@ export const goalPlanGenerationFlow = genkitAI.defineFlow(
     outputSchema: goalPlanGenerationResultSchema
   },
   async ({ payload, context }): Promise<GoalPlanGenerationResult> => {
+    let degraded = false;
     if (getAIProviderMode() === "vertex") {
       try {
         return await generateStructuredWithVertex(
@@ -100,7 +112,7 @@ export const goalPlanGenerationFlow = genkitAI.defineFlow(
           goalPlanGenerationResultSchema
         );
       } catch (error) {
-        handleProviderFallback("goal_plan_generation", error);
+        degraded = handleProviderFallback("goal_plan_generation", error);
       }
     }
 
@@ -143,7 +155,8 @@ export const goalPlanGenerationFlow = genkitAI.defineFlow(
           estimatedMinutes: 10,
           priority: "high"
         }
-      ]
+      ],
+      ...(degraded ? { degraded: true } : {})
     });
   }
 );
@@ -166,6 +179,7 @@ export const vibeFeedbackFlow = genkitAI.defineFlow(
       });
     }
 
+    let degraded = false;
     if (getAIProviderMode() === "vertex") {
       try {
         const result = await generateStructuredWithVertex(
@@ -175,14 +189,15 @@ export const vibeFeedbackFlow = genkitAI.defineFlow(
         );
         return reviewVibeFeedbackForCrisis(result);
       } catch (error) {
-        handleProviderFallback("vibe_feedback", error);
+        degraded = handleProviderFallback("vibe_feedback", error);
       }
     }
 
     return reviewVibeFeedbackForCrisis(vibeFeedbackResultSchema.parse({
       feedback:
         "That sounds like a lot to carry, so make the next step small and visible. Pick one task you can move forward in 10 minutes, then reassess instead of trying to fix the whole day at once.",
-      needs_escalation: false
+      needs_escalation: false,
+      ...(degraded ? { degraded: true } : {})
     }));
   }
 );
@@ -197,6 +212,7 @@ export const syllabusImportFlow = genkitAI.defineFlow(
     outputSchema: syllabusImportResultSchema
   },
   async ({ payload }): Promise<SyllabusImportResult> => {
+    let degraded = false;
     if (getAIProviderMode() === "vertex") {
       try {
         return await generateStructuredWithVertex(
@@ -205,7 +221,7 @@ export const syllabusImportFlow = genkitAI.defineFlow(
           syllabusImportResultSchema
         );
       } catch (error) {
-        handleProviderFallback("syllabus_import", error);
+        degraded = handleProviderFallback("syllabus_import", error);
       }
     }
 
@@ -238,7 +254,8 @@ export const syllabusImportFlow = genkitAI.defineFlow(
             "Stub parser only created a review draft. Real syllabus extraction will be enabled after Vertex AI Gemini is connected.",
           sourceText: firstUsefulLine ?? null
         }
-      ]
+      ],
+      ...(degraded ? { degraded: true } : {})
     });
   }
 );
@@ -317,7 +334,7 @@ function safeJSON(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function handleProviderFallback(workflow: string, error: unknown): void {
+function handleProviderFallback(workflow: string, error: unknown): true {
   if (!isAIStubFallbackEnabled()) {
     throw error;
   }
@@ -327,6 +344,7 @@ function handleProviderFallback(workflow: string, error: unknown): void {
     provider: getAIProviderMode(),
     errorMessage: error instanceof Error ? error.message : "Unknown provider error"
   });
+  return true;
 }
 
 function buildAssistantStubResult(message: string, goalCount: number, plannerBlockCount: number): AssistantChatResult {
