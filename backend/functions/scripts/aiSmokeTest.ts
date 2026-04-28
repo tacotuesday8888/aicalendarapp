@@ -27,6 +27,7 @@ import {
   dailyLimitForWorkflow,
   nextWorkflowCountsForReservation
 } from "../src/ai/usagePolicy.js";
+import { needsCrisisSafetyResponse, reviewVibeFeedbackForCrisis } from "../src/ai/safety.js";
 
 process.env.AI_PROVIDER = "stub";
 
@@ -132,6 +133,23 @@ async function runSmokeTest() {
   });
   vibeFeedbackResultSchema.parse(escalationResult);
   assert.equal(escalationResult.needs_escalation, true);
+
+  assert.equal(needsCrisisSafetyResponse("quiero morir"), true);
+  assert.equal(needsCrisisSafetyResponse("je veux mourir"), true);
+  assert.equal(needsCrisisSafetyResponse("我不想活了"), true);
+  assert.deepEqual(
+    reviewVibeFeedbackForCrisis({
+      feedback: "If you feel suicidal, reach out right now.",
+      needs_escalation: false
+    }),
+    {
+      feedback:
+        "This sounds urgent. If you might hurt yourself or someone else, call local emergency services now. " +
+        "In the U.S. or Canada, call or text 988 for crisis support. If you can, move near another person " +
+        "and put distance between yourself and anything you could use to get hurt.",
+      needs_escalation: true
+    }
+  );
 
   const syllabusResult = await syllabusImportFlow({
     userID: "smoke-test-user",

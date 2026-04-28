@@ -254,7 +254,8 @@ async function createVibeFeedback(request: VibeFeedbackRequest): Promise<string>
     return "AI setup is not enabled yet. Save a quick check-in and keep using the planner while the AI provider is still undecided.";
   }
 
-  return response.text.trim() || "Take one small next step that lowers friction for the next hour.";
+  const feedback = response.text.trim() || "Take one small next step that lowers friction for the next hour.";
+  return crisisSafetyFeedback(feedback) ?? feedback;
 }
 
 async function confirmDraftArtifact(userID: string, request: AssistantDraftCommitRequest) {

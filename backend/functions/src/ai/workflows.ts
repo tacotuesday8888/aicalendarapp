@@ -21,7 +21,7 @@ import {
   type SyllabusImportResult,
   type VibeFeedbackResult
 } from "./schemas.js";
-import { crisisSafetyFeedback } from "./safety.js";
+import { crisisSafetyFeedback, reviewVibeFeedbackForCrisis } from "./safety.js";
 
 const USER_INPUT_BEGIN = "<<<USER_INPUT_BEGIN>>>";
 const USER_INPUT_END = "<<<USER_INPUT_END>>>";
@@ -168,21 +168,22 @@ export const vibeFeedbackFlow = genkitAI.defineFlow(
 
     if (getAIProviderMode() === "vertex") {
       try {
-        return await generateStructuredWithVertex(
+        const result = await generateStructuredWithVertex(
           VIBE_FEEDBACK_SYSTEM_PROMPT,
           workflowPrompt("vibe_feedback", payload),
           vibeFeedbackResultSchema
         );
+        return reviewVibeFeedbackForCrisis(result);
       } catch (error) {
         handleProviderFallback("vibe_feedback", error);
       }
     }
 
-    return vibeFeedbackResultSchema.parse({
+    return reviewVibeFeedbackForCrisis(vibeFeedbackResultSchema.parse({
       feedback:
         "That sounds like a lot to carry, so make the next step small and visible. Pick one task you can move forward in 10 minutes, then reassess instead of trying to fix the whole day at once.",
       needs_escalation: false
-    });
+    }));
   }
 );
 
