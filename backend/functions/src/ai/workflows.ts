@@ -21,6 +21,7 @@ import {
   type SyllabusImportResult,
   type VibeFeedbackResult
 } from "./schemas.js";
+import { crisisSafetyFeedback } from "./safety.js";
 
 const assistantWorkflowContextSchema = z.object({
   timezone: z.string(),
@@ -51,6 +52,15 @@ export const assistantChatFlow = genkitAI.defineFlow(
     outputSchema: assistantChatResultSchema
   },
   async ({ payload, context }, { sendChunk }): Promise<AssistantChatResult> => {
+    const safetyFeedback = crisisSafetyFeedback(payload.message);
+    if (safetyFeedback) {
+      sendChunk(safetyFeedback);
+      return assistantChatResultSchema.parse({
+        message: safetyFeedback,
+        draftActions: []
+      });
+    }
+
     if (getAIProviderMode() === "vertex") {
       try {
         return await generateAssistantChatWithVertex(payload, context, sendChunk);
@@ -145,10 +155,10 @@ export const vibeFeedbackFlow = genkitAI.defineFlow(
     outputSchema: vibeFeedbackResultSchema
   },
   async ({ payload }): Promise<VibeFeedbackResult> => {
-    if (containsImmediateDanger(payload.reflectionText)) {
+    const safetyFeedback = crisisSafetyFeedback(payload.reflectionText);
+    if (safetyFeedback) {
       return vibeFeedbackResultSchema.parse({
-        feedback:
-          "If you might hurt yourself or you are in immediate danger, contact emergency services now or reach out to a trusted person who can stay with you. For the next minute, move away from anything unsafe and ask for help directly.",
+        feedback: safetyFeedback,
         needs_escalation: true
       });
     }
@@ -342,8 +352,9 @@ function buildAssistantStubResult(message: string, goalCount: number, plannerBlo
 
   return {
     message:
-      `AI is running in stub mode. I found ${goalCount} goal item(s) and ${plannerBlockCount} planner block(s), ` +
-      "so the backend/auth/context path is working; real model responses will come after Vertex AI Gemini is enabled.",
+      goalCount > 0 || plannerBlockCount > 0
+        ? "AI is temporarily unavailable. Your goals and planner data are still saved, so try again after the service is restored."
+        : "AI is temporarily unavailable. Add a goal or planner block, then try again after the service is restored.",
     draftActions
   };
 }
@@ -371,17 +382,6 @@ function shouldSuggestDraftAction(message: string): boolean {
     normalized.includes("calendar") ||
     normalized.includes("deadline") ||
     normalized.includes("goal")
-  );
-}
-
-function containsImmediateDanger(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return (
-    normalized.includes("kill myself") ||
-    normalized.includes("suicide") ||
-    normalized.includes("end my life") ||
-    normalized.includes("hurt myself") ||
-    normalized.includes("immediate danger")
   );
 }
 

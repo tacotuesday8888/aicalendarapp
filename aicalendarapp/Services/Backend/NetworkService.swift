@@ -2,6 +2,9 @@ import Foundation
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
+#if canImport(FirebaseAppCheck)
+import FirebaseAppCheck
+#endif
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif
@@ -39,6 +42,9 @@ final class NetworkService: NetworkServicing {
         if let authorizationHeader = try await authorizationHeaderValue(), request.value(forHTTPHeaderField: "Authorization") == nil {
             request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         }
+        if let appCheckHeader = try await appCheckHeaderValue(), request.value(forHTTPHeaderField: "X-Firebase-AppCheck") == nil {
+            request.setValue(appCheckHeader, forHTTPHeaderField: "X-Firebase-AppCheck")
+        }
         endpoint.headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         var attempt = 0
@@ -53,7 +59,9 @@ final class NetworkService: NetworkServicing {
 
                 let statusCode = httpResponse.statusCode
                 guard (200..<300).contains(statusCode) else {
-                    let httpError = AppError.network(description: "Request failed with status \(statusCode).")
+                    let httpError = AppError.network(
+                        description: Self.errorMessage(from: data) ?? "Request failed with status \(statusCode)."
+                    )
                     if (400..<500).contains(statusCode) { throw httpError }
                     lastError = httpError
                     attempt += 1
@@ -78,6 +86,33 @@ final class NetworkService: NetworkServicing {
         throw AppError.wrap(lastError ?? AppError.network(description: "Request failed."), fallback: "Request failed.")
     }
 
+    nonisolated private static func errorMessage(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = object["error"] as? String, !error.isEmpty {
+                return error
+            }
+
+            if let error = object["error"] as? [String: Any],
+               let message = error["message"] as? String,
+               !message.isEmpty
+            {
+                return message
+            }
+        }
+
+        if let rawMessage = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !rawMessage.isEmpty,
+           rawMessage.count <= 500
+        {
+            return rawMessage
+        }
+
+        return nil
+    }
+
     #if canImport(FirebaseCore) && canImport(FirebaseAuth)
     nonisolated private func authorizationHeaderValue() async throws -> String? {
         guard FirebaseApp.app() != nil, let currentUser = Auth.auth().currentUser else {
@@ -100,5 +135,18 @@ final class NetworkService: NetworkServicing {
     }
     #else
     nonisolated private func authorizationHeaderValue() async throws -> String? { nil }
+    #endif
+
+    #if canImport(FirebaseCore) && canImport(FirebaseAppCheck)
+    nonisolated private func appCheckHeaderValue() async throws -> String? {
+        guard FirebaseApp.app() != nil else {
+            return nil
+        }
+
+        let token = try await AppCheck.appCheck().token(forcingRefresh: false)
+        return token.token
+    }
+    #else
+    nonisolated private func appCheckHeaderValue() async throws -> String? { nil }
     #endif
 }

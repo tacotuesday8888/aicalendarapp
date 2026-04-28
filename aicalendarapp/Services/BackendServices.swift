@@ -433,6 +433,7 @@ final class StorageService: StorageServicing {
     #endif
 }
 
+#if DEBUG
 actor LocalCredentialStore {
     private let secureStore: KeychainStore
 
@@ -460,6 +461,7 @@ actor LocalCredentialStore {
         Data(SHA256.hash(data: Data(password.utf8)))
     }
 }
+#endif
 
 actor AuthContinuationStore {
     private var continuations = [UUID: AsyncStream<UserProfile?>.Continuation]()
@@ -484,7 +486,9 @@ final class AuthService: AuthServicing {
     weak var userService: UserServicing?
 
     private static let sessionKey = "auth.current_user_id"
+    #if DEBUG
     private let credentials = LocalCredentialStore()
+    #endif
     private let continuationStore = AuthContinuationStore()
     private let sessionStore: KeychainStore
     private let logger = AppLogger(category: "auth")
@@ -539,6 +543,7 @@ final class AuthService: AuthServicing {
         }
         #endif
 
+        #if DEBUG
         guard let savedIDData = try? sessionStore.value(for: Self.sessionKey),
               let savedID = String(data: savedIDData, encoding: .utf8),
               !savedID.isEmpty else {
@@ -553,6 +558,7 @@ final class AuthService: AuthServicing {
             logger.notice("Could not restore previous session: \(error.localizedDescription)")
             try? sessionStore.deleteValue(for: Self.sessionKey)
         }
+        #endif
     }
 
     func signIn(email: String, password: String) async throws -> UserProfile {
@@ -560,6 +566,7 @@ final class AuthService: AuthServicing {
             return firebaseProfile
         }
 
+        #if DEBUG
         guard try await credentials.passwordMatches(password, for: email) else {
             throw AppError.invalidCredentials
         }
@@ -567,6 +574,9 @@ final class AuthService: AuthServicing {
         let existingProfile = try await fetchExistingProfile(email: email)
         setCurrentUser(existingProfile)
         return existingProfile
+        #else
+        throw AppError.integrationUnavailable("FirebaseAuth")
+        #endif
     }
 
     func signUp(email: String, password: String, displayName: String) async throws -> UserProfile {
@@ -574,6 +584,7 @@ final class AuthService: AuthServicing {
             return firebaseProfile
         }
 
+        #if DEBUG
         let profile = UserProfile(
             id: UUID().uuidString,
             email: email,
@@ -589,6 +600,9 @@ final class AuthService: AuthServicing {
         try await requiredUserService().saveProfile(profile)
         setCurrentUser(profile)
         return profile
+        #else
+        throw AppError.integrationUnavailable("FirebaseAuth")
+        #endif
     }
 
     func signInWithApple() async throws -> UserProfile {
@@ -596,6 +610,7 @@ final class AuthService: AuthServicing {
             return firebaseProfile
         }
 
+        #if DEBUG
         let result = try await AppleSignInCoordinator().start()
         let profile = UserProfile(
             id: result.userIdentifier,
@@ -610,6 +625,9 @@ final class AuthService: AuthServicing {
         try await requiredUserService().saveProfile(profile)
         setCurrentUser(profile)
         return profile
+        #else
+        throw AppError.integrationUnavailable("FirebaseAuth")
+        #endif
     }
 
     func signInWithGoogle() async throws -> UserProfile {
@@ -617,6 +635,7 @@ final class AuthService: AuthServicing {
             return firebaseProfile
         }
 
+        #if DEBUG
         #if canImport(GoogleSignIn)
         guard !AppConfiguration.shared.googleClientID.isEmpty else {
             throw AppError.missingConfiguration("GoogleClientID")
@@ -655,6 +674,9 @@ final class AuthService: AuthServicing {
         try await requiredUserService().saveProfile(profile)
         setCurrentUser(profile)
         return profile
+        #endif
+        #else
+        throw AppError.integrationUnavailable("FirebaseAuth")
         #endif
     }
 

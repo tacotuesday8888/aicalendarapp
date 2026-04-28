@@ -1,18 +1,26 @@
 import { getAuth } from "firebase-admin/auth";
-import { HttpsError, onRequest } from "firebase-functions/v2/https";
+import { logger } from "firebase-functions/v2";
+import { HttpsError, onRequest, type HttpsOptions } from "firebase-functions/v2/https";
 import type { Request, Response } from "express";
 import { ZodError, type ZodType } from "zod";
 
+import { verifyAppCheckRequest } from "./appCheck.js";
+
 type AuthenticatedHandler<T> = (context: { authUID: string; data: T }) => Promise<unknown>;
 
-export function onAuthenticatedJsonRequest<T>(schema: ZodType<T>, handler: AuthenticatedHandler<T>) {
-  return onRequest(async (request: Request, response: Response) => {
+export function onAuthenticatedJsonRequest<T>(
+  schema: ZodType<T>,
+  handler: AuthenticatedHandler<T>,
+  options: HttpsOptions = {}
+) {
+  return onRequest(options, async (request: Request, response: Response) => {
     if (request.method !== "POST") {
       response.status(405).json({ success: false, error: "Only POST requests are supported." });
       return;
     }
 
     try {
+      await verifyAppCheckRequest(request, request.path || request.originalUrl || "authenticated-json-request");
       const authUID = await verifyBearerToken(request);
       const data = schema.parse(parseBody(request));
       const result = await handler({ authUID, data });
@@ -56,6 +64,14 @@ function respondWithError(response: Response, error: unknown) {
     return;
   }
 
+  if (error instanceof SyntaxError) {
+    response.status(400).json({
+      success: false,
+      error: "Invalid JSON request body."
+    });
+    return;
+  }
+
   if (error instanceof HttpsError) {
     response.status(statusCode(error.code)).json({
       success: false,
@@ -64,10 +80,10 @@ function respondWithError(response: Response, error: unknown) {
     return;
   }
 
-  const message = error instanceof Error ? error.message : "Unknown server error.";
+  logger.error("Authenticated JSON request failed", { error });
   response.status(500).json({
     success: false,
-    error: message
+    error: "Internal server error."
   });
 }
 
@@ -83,6 +99,8 @@ function statusCode(code: HttpsError["code"]): number {
       return 404;
     case "resource-exhausted":
       return 429;
+    case "failed-precondition":
+      return 412;
     default:
       return 500;
   }

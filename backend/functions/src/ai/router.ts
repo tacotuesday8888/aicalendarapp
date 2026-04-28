@@ -3,6 +3,7 @@ import { logger } from "firebase-functions/v2";
 import { HttpsError, onRequest } from "firebase-functions/v2/https";
 import type { Request, Response } from "express";
 
+import { verifyAppCheckRequest } from "../shared/appCheck.js";
 import { loadAssistantWorkflowContext, loadGoalPlanWorkflowContext } from "./context.js";
 import {
   storeAssistantChatReviewState,
@@ -17,7 +18,7 @@ import {
   vibeFeedbackFlow
 } from "./workflows.js";
 import { aiRunRequestSchema, type AIRunRequest, type AIWorkflow } from "./schemas.js";
-import { enforceAIRateLimit, logAIUsage } from "./usage.js";
+import { authorizeAndReserveAIUsage, logAIUsage } from "./usage.js";
 
 type AIRunSuccess = {
   workflow: AIWorkflow;
@@ -52,6 +53,7 @@ export const ai = onRequest({ timeoutSeconds: 300 }, async (request: Request, re
   let authUID: string | null = null;
 
   try {
+    await verifyAppCheckRequest(request, request.path || "ai");
     authUID = await verifyBearerToken(request);
 
     const parseResult = aiRunRequestSchema.safeParse(parseBody(request));
@@ -66,7 +68,7 @@ export const ai = onRequest({ timeoutSeconds: 300 }, async (request: Request, re
     }
 
     parsedRequest = parseResult.data;
-    await enforceAIRateLimit(authUID);
+    await authorizeAndReserveAIUsage(authUID, parsedRequest.workflow);
 
     if (parsedRequest.workflow === "assistant_chat" && wantsStreamingResponse(request)) {
       await streamAssistantChat(authUID, parsedRequest, response);
@@ -202,6 +204,8 @@ function mapError(error: unknown): { code: AIErrorCode; status: number; message:
         return { code: "unauthorized", status: 401, message: "Authentication is required." };
       case "resource-exhausted":
         return { code: "rate_limited", status: 429, message: error.message };
+      case "permission-denied":
+        return { code: "unauthorized", status: 403, message: error.message };
       case "invalid-argument":
         return { code: "invalid_payload", status: 400, message: "Invalid request." };
       default:

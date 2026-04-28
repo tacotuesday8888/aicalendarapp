@@ -31,5 +31,5 @@ export function getAIMaxOutputTokens(): number {
 
 export function isAIStubFallbackEnabled(): boolean {
   const rawValue = process.env.AI_ENABLE_STUB_FALLBACK?.trim().toLowerCase();
-  return rawValue !== "false" && rawValue !== "0";
+  return rawValue === "true" || rawValue === "1" || rawValue === "yes";
 }

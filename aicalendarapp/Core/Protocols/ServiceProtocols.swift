@@ -68,6 +68,7 @@ protocol BackendFunctionServicing: AnyObject {
     func importSyllabusFile(_ request: ImportFileRequestPayload) async throws -> ImportJob
     func commitImport(_ request: ImportCommitPayload) async throws
     func deleteImport(_ request: DeleteImportPayload) async throws
+    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws
     func deleteUserAccount(_ request: UserJobRequestPayload) async throws
     func exportUserData(_ request: UserJobRequestPayload) async throws -> ExportUserDataResponsePayload
 }
@@ -104,6 +105,7 @@ protocol AnalyticsServicing: AnyObject {
 
 protocol SubscriptionServicing: AnyObject {
     func observeSubscriptionState(for userID: String) -> AsyncStream<SubscriptionState>
+    func availableOffers() async throws -> [SubscriptionOffer]
     func refreshStatus(for userID: String) async throws -> SubscriptionState
     func purchase(plan: SubscriptionPlan, for userID: String) async throws -> SubscriptionState
     func restore(for userID: String) async throws -> SubscriptionState

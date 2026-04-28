@@ -20,6 +20,8 @@ import {
   buildGoalPlanPrompt,
   buildVibeFeedbackPrompt
 } from "./prompts.js";
+import { crisisSafetyFeedback } from "./safety.js";
+import { authorizeAndReserveAIUsage, logAIUsage } from "./usage.js";
 
 type AssistantDraftRecord = {
   id: string;
@@ -42,29 +44,28 @@ type GoalPlanCompletion = {
 
 export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
-  await enforceRateLimit(userID);
+  await authorizeAndReserveAIUsage(userID, "assistant_chat");
 
   const thread = await createAssistantThread(userID, data);
+  await logAIUsage(userID, "assistant_chat", "success");
   return { thread };
 });
 
 export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
-  await enforceRateLimit(userID);
+  await authorizeAndReserveAIUsage(userID, "goal_plan_generation");
 
   const draft = await createGoalPlanDraft(userID, data);
+  await logAIUsage(userID, "goal_plan_generation", "success");
   return draft;
 });
 
 export const generateVibeFeedback = onAuthenticatedJsonRequest(vibeFeedbackRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
-  await enforceRateLimit(userID);
+  await authorizeAndReserveAIUsage(userID, "vibe_feedback");
 
   const feedback = await createVibeFeedback(data);
-  await userScopedCollection(userID, "aiUsageLogs").add({
-    type: "generateVibeFeedback",
-    createdAt: serverTimestamp()
-  });
+  await logAIUsage(userID, "vibe_feedback", "success");
 
   return { feedback };
 });
@@ -76,25 +77,12 @@ export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCom
   return { success: true };
 });
 
-async function enforceRateLimit(userID: string, maxPerDay: number = 50) {
-  const logs = userScopedCollection(userID, "aiUsageLogs");
-  const oneDayAgo = new Date();
-  oneDayAgo.setDate(oneDayAgo.getDate() - 1);
-
-  const recent = await logs
-    .where("createdAt", ">=", oneDayAgo)
-    .count()
-    .get();
-
-  if (recent.data().count >= maxPerDay) {
-    throw new HttpsError(
-      "resource-exhausted",
-      `You've reached the daily AI limit (${maxPerDay} requests). Try again tomorrow.`
-    );
-  }
-}
-
 async function createAssistantThread(userID: string, request: AssistantRequest) {
+  const safetyFeedback = crisisSafetyFeedback(request.message);
+  if (safetyFeedback) {
+    return appendAssistantExchange(userID, request.message, safetyFeedback, []);
+  }
+
   const provider = createAIProvider();
   const response = await provider.complete({
     system: buildAssistantSystemPrompt(),
@@ -155,12 +143,61 @@ async function createAssistantThread(userID: string, request: AssistantRequest) 
         sourceThreadID: threadRef.id,
         createdAt: serverTimestamp()
       })
-    ),
-    userScopedCollection(userID, "aiUsageLogs").add({
-      type: "assistantRespond",
-      createdAt: serverTimestamp()
-    })
+    )
   ]);
+
+  return {
+    id: threadRef.id,
+    messages,
+    pendingDrafts
+  };
+}
+
+async function appendAssistantExchange(
+  userID: string,
+  userMessage: string,
+  assistantMessage: string,
+  newDrafts: AssistantDraftRecord[]
+) {
+  const threads = userScopedCollection(userID, "assistantThreads");
+  const threadRef = threads.doc("primary");
+  const threadSnapshot = await threadRef.get();
+  const existingThread = threadSnapshot.data() as
+    | {
+        messages?: unknown[];
+        pendingDrafts?: AssistantDraftRecord[];
+      }
+    | undefined;
+  const existingMessages = Array.isArray(existingThread?.messages) ? existingThread.messages : [];
+  const existingPendingDrafts = Array.isArray(existingThread?.pendingDrafts) ? existingThread.pendingDrafts : [];
+  const timestamp = Date.now();
+  const pendingDrafts = [...existingPendingDrafts, ...newDrafts];
+  const messages = [
+    ...existingMessages,
+    {
+      id: `${threadRef.id}-user-${timestamp}`,
+      role: "user",
+      content: userMessage,
+      createdAt: new Date(timestamp).toISOString()
+    },
+    {
+      id: `${threadRef.id}-assistant-${timestamp}`,
+      role: "assistant",
+      content: assistantMessage,
+      createdAt: new Date(timestamp).toISOString()
+    }
+  ];
+
+  await threadRef.set(
+    {
+      id: threadRef.id,
+      messages,
+      pendingDrafts,
+      createdAt: threadSnapshot.exists ? threadSnapshot.get("createdAt") ?? serverTimestamp() : serverTimestamp(),
+      updatedAt: serverTimestamp()
+    },
+    { merge: true }
+  );
 
   return {
     id: threadRef.id,
@@ -194,11 +231,6 @@ async function createGoalPlanDraft(userID: string, request: GoalPlanRequest) {
     draftRef.set({
       ...draft,
       createdAt: serverTimestamp()
-    }),
-    userScopedCollection(userID, "aiUsageLogs").add({
-      type: "generateGoalPlan",
-      goalID: String(request.goal.id ?? ""),
-      createdAt: serverTimestamp()
     })
   ]);
 
@@ -206,6 +238,11 @@ async function createGoalPlanDraft(userID: string, request: GoalPlanRequest) {
 }
 
 async function createVibeFeedback(request: VibeFeedbackRequest): Promise<string> {
+  const safetyFeedback = crisisSafetyFeedback(request.prompt);
+  if (safetyFeedback) {
+    return safetyFeedback;
+  }
+
   const provider = createAIProvider();
   const response = await provider.complete({
     system: buildAssistantSystemPrompt(),
@@ -224,7 +261,7 @@ async function confirmDraftArtifact(userID: string, request: AssistantDraftCommi
   const snapshot = await draftRef.get();
 
   if (!snapshot.exists) {
-    throw new Error("Draft artifact was not found.");
+    throw new HttpsError("not-found", "Draft artifact was not found.");
   }
 
   await draftRef.set(

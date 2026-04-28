@@ -125,6 +125,37 @@ enum SubscriptionPlan: String, Codable, CaseIterable, Sendable {
     case annual
 }
 
+struct SubscriptionOffer: Codable, Hashable, Identifiable, Sendable {
+    var plan: SubscriptionPlan
+    var displayName: String
+    var priceText: String
+    var renewalText: String
+    var trialText: String?
+    var productID: String?
+
+    var id: String { plan.rawValue }
+
+    nonisolated static let fallbackAnnual = SubscriptionOffer(
+        plan: .annual,
+        displayName: "Annual",
+        priceText: "Price shown at checkout",
+        renewalText: "Renews yearly until canceled.",
+        trialText: "Free trial eligibility is confirmed by the App Store.",
+        productID: nil
+    )
+
+    nonisolated static let fallbackMonthly = SubscriptionOffer(
+        plan: .monthly,
+        displayName: "Monthly",
+        priceText: "Price shown at checkout",
+        renewalText: "Renews monthly until canceled.",
+        trialText: nil,
+        productID: nil
+    )
+
+    nonisolated static let fallbackOffers = [fallbackAnnual, fallbackMonthly]
+}
+
 enum EntitlementState: String, Codable, CaseIterable, Sendable {
     case unknown
     case inactive

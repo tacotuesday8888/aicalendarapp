@@ -34,11 +34,12 @@ final class BackendFunctionService: BackendFunctionServicing {
     }
 
     func generateVibeFeedback(_ request: VibeFeedbackRequestPayload) async throws -> VibeFeedbackResponsePayload {
-        if let response = try await invoke("generateVibeFeedback", body: request, decode: VibeFeedbackResponsePayload.self) {
-            return response
-        }
-
-        return VibeFeedbackResponsePayload(feedback: localVibeFeedback(for: request.prompt))
+        try await invokeRequired(
+            "generateVibeFeedback",
+            body: request,
+            decode: VibeFeedbackResponsePayload.self,
+            feature: "Vibe feedback"
+        )
     }
 
     func commitAssistantDraft(_ request: AssistantDraftCommitPayload) async throws {
@@ -86,6 +87,15 @@ final class BackendFunctionService: BackendFunctionServicing {
         )
     }
 
+    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws {
+        _ = try await invokeRequired(
+            "syncRevenueCatSubscription",
+            body: request,
+            decode: OperationStatusPayload.self,
+            feature: "Subscription backend sync"
+        )
+    }
+
     func deleteUserAccount(_ request: UserJobRequestPayload) async throws {
         _ = try await invokeRequired(
             "deleteUserAccount",
@@ -124,24 +134,6 @@ final class BackendFunctionService: BackendFunctionServicing {
         )
 
         return try await networkService.request(endpoint, decode: Response.self)
-    }
-
-    private func localVibeFeedback(for prompt: String) -> String {
-        let normalized = prompt.lowercased()
-
-        if normalized.contains("overwhelmed") || normalized.contains("burned out") || normalized.contains("anxious") {
-            return "Lower the bar for the next hour. Pick one task you can finish in 10 to 15 minutes, then reassess with a calmer baseline."
-        }
-
-        if normalized.contains("stuck") || normalized.contains("behind") || normalized.contains("avoid") {
-            return "Reduce friction instead of forcing momentum. Open the task, define the first visible move, and give yourself one short focus block to restart."
-        }
-
-        if normalized.contains("good") || normalized.contains("great") || normalized.contains("motivated") || normalized.contains("energized") {
-            return "Use the momentum while it is real. Protect one meaningful block for your hardest task before the day gets fragmented."
-        }
-
-        return "Take the next 10 minutes to make one part of today easier: clear one blocker, shrink one task, or lock one study block into your schedule."
     }
 
     private func invokeRequired<Request: Encodable, Response: Decodable>(

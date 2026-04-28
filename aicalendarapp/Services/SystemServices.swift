@@ -45,6 +45,7 @@ final class NotificationService: NotificationServicing {
     private let center = UNUserNotificationCenter.current()
     private let logger = AppLogger(category: "notifications")
     private var remoteToken: String?
+    private var authStateTask: Task<Void, Never>?
 
     func requestAuthorization() async throws -> NotificationPermissionState {
         let granted = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
@@ -105,10 +106,22 @@ final class NotificationService: NotificationServicing {
     func updateRemoteToken(_ token: String) {
         remoteToken = token
         logger.info("Updated remote push token.")
+        persistRemoteTokenIfPossible()
+    }
 
-        guard let userID = authService?.currentUserID, let userService else {
-            return
+    func startAuthStateSync() {
+        guard authStateTask == nil, let authService else { return }
+
+        authStateTask = Task { [weak self] in
+            for await profile in authService.authStateStream() {
+                guard profile != nil else { continue }
+                self?.persistRemoteTokenIfPossible()
+            }
         }
+    }
+
+    private func persistRemoteTokenIfPossible() {
+        guard let token = remoteToken, let userID = authService?.currentUserID, let userService else { return }
 
         Task {
             do {

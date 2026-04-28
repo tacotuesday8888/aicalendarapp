@@ -1,12 +1,18 @@
-import { onRequest } from "firebase-functions/v2/https";
+import { HttpsError, onRequest } from "firebase-functions/v2/https";
 import { logger } from "firebase-functions/v2";
+import { timingSafeEqual } from "node:crypto";
 
 import { db, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
+import { userJobRequestSchema } from "../shared/contracts.js";
+import { requireMatchingUser } from "../shared/context.js";
+import { onAuthenticatedJsonRequest } from "../shared/http.js";
 
 type RevenueCatWebhookEvent = {
   id?: string;
   type?: string;
   app_user_id?: string;
+  original_app_user_id?: string;
+  aliases?: string[];
   transferred_from?: string[];
   transferred_to?: string[];
   entitlement_ids?: string[] | null;
@@ -171,21 +177,51 @@ async function persistSubscriptionSnapshot(
 ): Promise<void> {
   await userScopedCollection(userID, "subscriptions").doc("current").set({
     entitlement: snapshot.entitlement,
-    activePlan: snapshot.activePlan,
+    activePlan: appPlanFromProductID(snapshot.activePlan),
     entitlementIDs: snapshot.entitlementIDs,
     source: snapshot.source,
     lastEventID: eventID,
     lastEventType: event.type ?? "unknown",
     revenueCatEnvironment: event.environment ?? null,
-    revenueCatProductID: event.product_id ?? null,
+    revenueCatProductID: snapshot.activePlan !== "none" ? snapshot.activePlan : event.product_id ?? null,
     revenueCatStore: event.store ?? null,
     updatedAt: serverTimestamp()
   }, { merge: true });
 }
 
+export const syncRevenueCatSubscription = onAuthenticatedJsonRequest(userJobRequestSchema, async ({ authUID, data }) => {
+  const userID = requireMatchingUser(authUID, data.userID);
+  const secretApiKey = process.env.REVENUECAT_SECRET_API_KEY?.trim();
+
+  if (!secretApiKey) {
+    throw new HttpsError("failed-precondition", "RevenueCat subscriber sync is not configured.");
+  }
+
+  const snapshot = await fetchRevenueCatSubscriberSnapshot(userID, secretApiKey);
+  const syncEventID = `subscriber-sync-${userID}-${Date.now()}`;
+  await persistSubscriptionSnapshot(
+    userID,
+    snapshot,
+    {
+      id: syncEventID,
+      type: "SUBSCRIBER_SYNC"
+    },
+    syncEventID
+  );
+
+  return { success: true };
+}, {
+  secrets: ["REVENUECAT_SECRET_API_KEY"]
+});
+
 export const revenueCatWebhook = onRequest({
-  secrets: ["REVENUECAT_WEBHOOK_SECRET"]
+  secrets: ["REVENUECAT_WEBHOOK_SECRET", "REVENUECAT_SECRET_API_KEY"]
 }, async (request, response) => {
+  if (request.method !== "POST") {
+    response.status(405).send({ success: false, reason: "Only POST requests are supported." });
+    return;
+  }
+
   const expectedAuthorizationHeader = process.env.REVENUECAT_WEBHOOK_SECRET?.trim();
 
   if (!expectedAuthorizationHeader) {
@@ -202,7 +238,7 @@ export const revenueCatWebhook = onRequest({
   }
 
   const providedAuthorizationHeader = (request.header("Authorization") ?? "").trim();
-  if (providedAuthorizationHeader !== expectedAuthorizationHeader) {
+  if (!constantTimeEquals(providedAuthorizationHeader, expectedAuthorizationHeader)) {
     response.status(401).send({ success: false, reason: "Invalid webhook authorization header." });
     return;
   }
@@ -222,7 +258,11 @@ export const revenueCatWebhook = onRequest({
     return;
   }
 
-  const primaryUserIDs = uniqueUserIDs([event.app_user_id]);
+  const primaryUserIDs = uniqueUserIDs([
+    event.app_user_id,
+    event.original_app_user_id,
+    ...(Array.isArray(event.aliases) ? event.aliases : [])
+  ]);
   const transferredFromUserIDs = uniqueUserIDs(Array.isArray(event.transferred_from) ? event.transferred_from : []);
   const transferredToUserIDs = uniqueUserIDs(Array.isArray(event.transferred_to) ? event.transferred_to : []);
   const affectedUserIDs = uniqueUserIDs([
@@ -286,3 +326,37 @@ export const revenueCatWebhook = onRequest({
 
   response.status(200).send({ success: true });
 });
+
+function constantTimeEquals(lhs: string, rhs: string): boolean {
+  const lhsBuffer = Buffer.from(lhs);
+  const rhsBuffer = Buffer.from(rhs);
+  return lhsBuffer.length === rhsBuffer.length && timingSafeEqual(lhsBuffer, rhsBuffer);
+}
+
+function appPlanFromProductID(productID: string): "monthly" | "annual" | "none" {
+  if (!productID || productID === "none") {
+    return "none";
+  }
+
+  const monthlyProductID = process.env.REVENUECAT_MONTHLY_PRODUCT_ID?.trim();
+  const annualProductID = process.env.REVENUECAT_ANNUAL_PRODUCT_ID?.trim();
+
+  if (monthlyProductID && productID === monthlyProductID) {
+    return "monthly";
+  }
+
+  if (annualProductID && productID === annualProductID) {
+    return "annual";
+  }
+
+  const normalized = productID.toLowerCase();
+  if (normalized.includes("annual") || normalized.includes("year")) {
+    return "annual";
+  }
+
+  if (normalized.includes("month")) {
+    return "monthly";
+  }
+
+  return "none";
+}

@@ -27,16 +27,34 @@ final class AuthViewModel: ObservableObject {
 
     func submit() async {
         errorMessage = nil
+
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidEmail(trimmedEmail) else {
+            errorMessage = "Enter a valid email address."
+            return
+        }
+        if mode == .signUp {
+            guard password.count >= 8 else {
+                errorMessage = "Use at least 8 characters for your password."
+                return
+            }
+            guard !trimmedDisplayName.isEmpty else {
+                errorMessage = "Enter your display name."
+                return
+            }
+        }
+
         isLoading = true
         defer { isLoading = false }
 
         do {
             switch mode {
             case .signIn:
-                _ = try await authService.signIn(email: email, password: password)
+                _ = try await authService.signIn(email: trimmedEmail, password: password)
                 analyticsService.track(event: "auth_signed_in")
             case .signUp:
-                _ = try await authService.signUp(email: email, password: password, displayName: displayName)
+                _ = try await authService.signUp(email: trimmedEmail, password: password, displayName: trimmedDisplayName)
                 analyticsService.track(event: "auth_signed_up")
             }
         } catch {
@@ -69,6 +87,11 @@ final class AuthViewModel: ObservableObject {
             errorMessage = AppError.wrap(error, fallback: "Unable to sign in with \(name.capitalized).").errorDescription
             analyticsService.record(error: error, context: "auth_provider_\(name)")
         }
+    }
+
+    private static func isValidEmail(_ value: String) -> Bool {
+        let pattern = #"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$"#
+        return value.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 }
 
@@ -125,7 +148,12 @@ struct AuthView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .buttonStyle(SWGlassCTAButtonStyle())
-                                .disabled(viewModel.isLoading || viewModel.email.isEmpty || viewModel.password.isEmpty)
+                                .disabled(
+                                    viewModel.isLoading ||
+                                    viewModel.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                    viewModel.password.isEmpty ||
+                                    (viewModel.mode == .signUp && viewModel.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                )
 
                                 Divider()
 

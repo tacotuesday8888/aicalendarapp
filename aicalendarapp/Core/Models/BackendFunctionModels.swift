@@ -113,4 +113,5 @@ struct ExportUserDataResponsePayload: Codable, Sendable {
     var requestedAt: Date
     var profile: JSONValue
     var collections: [String: [JSONValue]]
+    var systemCollections: [String: [JSONValue]]?
 }

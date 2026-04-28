@@ -56,6 +56,7 @@ final class SubscriptionService: SubscriptionServicing {
     private static let revenueCatEntitlementID = "aiefficiencyapp Pro"
 
     var analyticsService: AnalyticsServicing?
+    var backendFunctionService: BackendFunctionServicing?
     private let store = LocalSubscriptionStore()
     private let identityStore = LinkedSubscriptionIdentityStore()
     private let logger = AppLogger(category: "subscription-identity")
@@ -74,13 +75,32 @@ final class SubscriptionService: SubscriptionServicing {
         }
     }
 
+    func availableOffers() async throws -> [SubscriptionOffer] {
+        #if canImport(RevenueCat)
+        try ensureRevenueCatConfigured()
+        let offerings = try await fetchOfferings()
+        guard let current = offerings.current else {
+            throw AppError.dataNotFound
+        }
+
+        return [
+            current.annual.map { offer(for: .annual, package: $0) },
+            current.monthly.map { offer(for: .monthly, package: $0) }
+        ].compactMap { $0 }
+        #else
+        throw AppError.integrationUnavailable("RevenueCat")
+        #endif
+    }
+
     func refreshStatus(for userID: String) async throws -> SubscriptionState {
         #if canImport(RevenueCat)
+        try ensureRevenueCatConfigured()
         let previousState = await store.currentState(for: userID)
         let customerInfo = try await fetchCustomerInfo()
         let offerings = try? await fetchOfferings()
         let mapped = map(customerInfo, currentOffering: offerings?.current, fallbackPlan: previousState.activePlan)
         await store.set(mapped, for: userID)
+        await syncBackendSubscriptionStatus(for: userID)
         return mapped
         #else
         return await store.currentState(for: userID)
@@ -89,6 +109,7 @@ final class SubscriptionService: SubscriptionServicing {
 
     func purchase(plan: SubscriptionPlan, for userID: String) async throws -> SubscriptionState {
         #if canImport(RevenueCat)
+        try ensureRevenueCatConfigured()
         let offerings = try await fetchOfferings()
 
         guard
@@ -103,27 +124,25 @@ final class SubscriptionService: SubscriptionServicing {
         let state = map(customerInfo, currentOffering: current, fallbackPlan: plan)
         analyticsService?.track(event: "subscription_purchased", parameters: ["plan": plan.rawValue])
         await store.set(state, for: userID)
+        await syncBackendSubscriptionStatus(for: userID)
         return state
         #else
-        let state = SubscriptionState(entitlement: .active, activePlan: plan, trialEligible: false, lastSyncedAt: .now)
-        analyticsService?.track(event: "subscription_unlocked_locally", parameters: ["plan": plan.rawValue])
-        await store.set(state, for: userID)
-        return state
+        throw AppError.integrationUnavailable("RevenueCat")
         #endif
     }
 
     func restore(for userID: String) async throws -> SubscriptionState {
         #if canImport(RevenueCat)
+        try ensureRevenueCatConfigured()
         let previousState = await store.currentState(for: userID)
         let customerInfo = try await restorePurchases()
         let offerings = try? await fetchOfferings()
         let state = map(customerInfo, currentOffering: offerings?.current, fallbackPlan: previousState.activePlan)
         await store.set(state, for: userID)
+        await syncBackendSubscriptionStatus(for: userID)
         return state
         #else
-        let state = SubscriptionState.unlocked
-        await store.set(state, for: userID)
-        return state
+        throw AppError.integrationUnavailable("RevenueCat")
         #endif
     }
 
@@ -162,7 +181,23 @@ final class SubscriptionService: SubscriptionServicing {
         #endif
     }
 
+    private func syncBackendSubscriptionStatus(for userID: String) async {
+        guard let backendFunctionService else { return }
+
+        do {
+            try await backendFunctionService.syncSubscriptionStatus(UserJobRequestPayload(userID: userID))
+        } catch {
+            analyticsService?.record(error: error, context: "subscription_backend_sync")
+        }
+    }
+
     #if canImport(RevenueCat)
+    private func ensureRevenueCatConfigured() throws {
+        guard Purchases.isConfigured else {
+            throw AppError.integrationUnavailable("RevenueCat")
+        }
+    }
+
     private func fetchCustomerInfo() async throws -> RevenueCat.CustomerInfo {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RevenueCat.CustomerInfo, Error>) in
             Purchases.shared.getCustomerInfo { customerInfo, error in
@@ -274,6 +309,68 @@ final class SubscriptionService: SubscriptionServicing {
             currentOffering.annual
         case .none:
             nil
+        }
+    }
+
+    private func offer(for plan: SubscriptionPlan, package: RevenueCat.Package) -> SubscriptionOffer {
+        let product = package.storeProduct
+        return SubscriptionOffer(
+            plan: plan,
+            displayName: displayName(for: plan),
+            priceText: package.localizedPriceString,
+            renewalText: renewalText(for: product.subscriptionPeriod),
+            trialText: trialText(for: product.introductoryDiscount),
+            productID: product.productIdentifier
+        )
+    }
+
+    private func displayName(for plan: SubscriptionPlan) -> String {
+        switch plan {
+        case .annual:
+            return "Annual"
+        case .monthly:
+            return "Monthly"
+        case .none:
+            return "Subscription"
+        }
+    }
+
+    private func renewalText(for period: RevenueCat.SubscriptionPeriod?) -> String {
+        guard let period else {
+            return "Renews automatically unless canceled."
+        }
+        return "Renews every \(periodDescription(period)) until canceled."
+    }
+
+    private func trialText(for discount: RevenueCat.StoreProductDiscount?) -> String? {
+        guard let discount else {
+            return nil
+        }
+
+        let period = periodDescription(discount.subscriptionPeriod)
+        if discount.price == 0 {
+            return "Free for \(period), then renews automatically."
+        }
+        return "Intro offer: \(discount.localizedPriceString) for \(period)."
+    }
+
+    private func periodDescription(_ period: RevenueCat.SubscriptionPeriod) -> String {
+        let unit = unitName(for: period.unit, plural: period.value != 1)
+        return period.value == 1 ? unit : "\(period.value) \(unit)"
+    }
+
+    private func unitName(for unit: RevenueCat.SubscriptionPeriod.Unit, plural: Bool) -> String {
+        switch unit {
+        case .day:
+            return plural ? "days" : "day"
+        case .week:
+            return plural ? "weeks" : "week"
+        case .month:
+            return plural ? "months" : "month"
+        case .year:
+            return plural ? "years" : "year"
+        @unknown default:
+            return plural ? "periods" : "period"
         }
     }
     #endif

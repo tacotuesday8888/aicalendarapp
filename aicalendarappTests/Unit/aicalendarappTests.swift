@@ -305,6 +305,10 @@ private final class TestSubscriptionService: SubscriptionServicing {
         }
     }
 
+    func availableOffers() async throws -> [SubscriptionOffer] {
+        SubscriptionOffer.fallbackOffers
+    }
+
     func refreshStatus(for userID: String) async throws -> SubscriptionState {
         state
     }
@@ -374,6 +378,8 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
 
     func deleteImport(_ request: DeleteImportPayload) async throws {}
 
+    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws {}
+
     func deleteUserAccount(_ request: UserJobRequestPayload) async throws {
         deletedUserIDs.append(request.userID)
     }
@@ -398,6 +404,10 @@ struct aicalendarappTests {
         "\(prefix)-\(UUID().uuidString)"
     }
 
+    private struct DatedPayload: Decodable {
+        var createdAt: Date
+    }
+
     private func testProfile(id: String = UUID().uuidString) -> UserProfile {
         UserProfile(
             id: id,
@@ -409,6 +419,18 @@ struct aicalendarappTests {
             selectedCalendarIDs: [],
             createdAt: Date(timeIntervalSince1970: 1_776_000_000)
         )
+    }
+
+    @Test func appDecoderParsesFractionalAndPlainISO8601Dates() throws {
+        let decoder = JSONDecoder.appDecoder()
+        let fractional = #"{"createdAt":"2026-04-26T22:33:38.123Z"}"#.data(using: .utf8)!
+        let plain = #"{"createdAt":"2026-04-26T22:33:38Z"}"#.data(using: .utf8)!
+
+        let fractionalPayload = try decoder.decode(DatedPayload.self, from: fractional)
+        let plainPayload = try decoder.decode(DatedPayload.self, from: plain)
+
+        #expect(abs(fractionalPayload.createdAt.timeIntervalSince1970 - 1_777_242_818.123) < 0.001)
+        #expect(plainPayload.createdAt.timeIntervalSince1970 == 1_777_242_818)
     }
 
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
@@ -891,6 +913,16 @@ struct aicalendarappTests {
 
         await #expect(throws: AppError.self) {
             try await service.exportUserData(UserJobRequestPayload(userID: uniqueUserID("export")))
+        }
+    }
+
+    @Test func vibeFeedbackRequiresLiveBackendInsteadOfLocalFallback() async {
+        let service = BackendFunctionService()
+
+        await #expect(throws: AppError.self) {
+            try await service.generateVibeFeedback(
+                VibeFeedbackRequestPayload(userID: uniqueUserID("vibe-safety"), prompt: "I want to die")
+            )
         }
     }
 

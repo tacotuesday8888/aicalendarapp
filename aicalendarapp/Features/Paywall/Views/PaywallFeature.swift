@@ -5,6 +5,7 @@ import Combine
 final class PaywallViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published private(set) var offers = SubscriptionOffer.fallbackOffers
 
     private let user: UserProfile
     private let trigger: PaywallTrigger
@@ -29,6 +30,15 @@ final class PaywallViewModel: ObservableObject {
     func prepare() async {
         paywallService.registerTriggers()
         await paywallService.handle(trigger: trigger, for: user.id)
+
+        do {
+            let liveOffers = try await subscriptionService.availableOffers()
+            if !liveOffers.isEmpty {
+                offers = liveOffers
+            }
+        } catch {
+            analyticsService.record(error: error, context: "paywall_offers")
+        }
     }
 
     func purchase(plan: SubscriptionPlan) async throws -> SubscriptionState {
@@ -47,6 +57,25 @@ final class PaywallViewModel: ObservableObject {
         analyticsService.track(event: "restore_tapped")
         return try await subscriptionService.restore(for: user.id)
     }
+
+    func offer(for plan: SubscriptionPlan) -> SubscriptionOffer {
+        offers.first(where: { $0.plan == plan }) ?? (plan == .monthly ? .fallbackMonthly : .fallbackAnnual)
+    }
+
+    func purchaseButtonTitle(for plan: SubscriptionPlan) -> String {
+        let offer = offer(for: plan)
+        switch plan {
+        case .annual:
+            if let trialText = offer.trialText, trialText.lowercased().contains("free") {
+                return "Start annual trial"
+            }
+            return "Choose annual"
+        case .monthly:
+            return "Choose monthly"
+        case .none:
+            return "Choose plan"
+        }
+    }
 }
 
 struct PaywallView: View {
@@ -55,6 +84,7 @@ struct PaywallView: View {
     let refreshErrorMessage: String?
     let isRefreshing: Bool
     let onRetryRefresh: (() -> Void)?
+    private let configuration = AppConfiguration.shared
 
     init(
         viewModel: PaywallViewModel,
@@ -106,15 +136,32 @@ struct PaywallView: View {
                 }
 
                 SWGlassPanel {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Monthly plan", systemImage: "calendar")
-                        Label("Annual plan with free trial", systemImage: "sparkles")
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(viewModel.offers) { offer in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Label(offer.displayName, systemImage: offer.plan == .annual ? "sparkles" : "calendar")
+                                    Spacer(minLength: 12)
+                                    Text(offer.priceText)
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                                Text(offer.renewalText)
+                                    .font(.footnote)
+                                    .foregroundStyle(AppTheme.textSecondary)
+                                if let trialText = offer.trialText {
+                                    Text(trialText)
+                                        .font(.footnote)
+                                        .foregroundStyle(AppTheme.textSecondary)
+                                }
+                            }
+                        }
+
                         Label("Restore purchases anytime", systemImage: "arrow.clockwise")
                     }
                 }
                 .font(.headline)
 
-                Button("Start annual trial") {
+                Button(viewModel.purchaseButtonTitle(for: .annual)) {
                     Task {
                         do {
                             let state = try await viewModel.purchase(plan: .annual)
@@ -132,7 +179,7 @@ struct PaywallView: View {
                 .buttonStyle(SWGlassCTAButtonStyle())
                 .disabled(viewModel.isLoading)
 
-                Button("Choose monthly") {
+                Button(viewModel.purchaseButtonTitle(for: .monthly)) {
                     Task {
                         do {
                             let state = try await viewModel.purchase(plan: .monthly)
@@ -166,6 +213,8 @@ struct PaywallView: View {
                 .buttonStyle(.plain)
                 .disabled(viewModel.isLoading)
 
+                subscriptionDisclosure
+
                 if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage)
                         .foregroundStyle(.red)
@@ -177,5 +226,21 @@ struct PaywallView: View {
         .task {
             await viewModel.prepare()
         }
+    }
+
+    private var subscriptionDisclosure: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Payment is charged to your Apple ID at confirmation. Subscriptions renew automatically unless canceled at least 24 hours before the end of the current period. Manage or cancel in App Store account settings.")
+            HStack(spacing: 12) {
+                if let termsOfServiceURL = configuration.termsOfServiceURL {
+                    Link("Terms", destination: termsOfServiceURL)
+                }
+                if let privacyPolicyURL = configuration.privacyPolicyURL {
+                    Link("Privacy Policy", destination: privacyPolicyURL)
+                }
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(AppTheme.textSecondary)
     }
 }

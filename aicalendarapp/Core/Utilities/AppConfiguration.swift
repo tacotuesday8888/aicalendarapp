@@ -11,6 +11,8 @@ struct AppConfiguration: Sendable {
     let superwallAPIKey: String
     let googleClientID: String
     let googleReversedClientID: String
+    let privacyPolicyURL: URL?
+    let termsOfServiceURL: URL?
 
     init(bundle: Bundle) {
         bundleID = bundle.bundleIdentifier ?? "com.langqi.aicalendarapp"
@@ -19,6 +21,8 @@ struct AppConfiguration: Sendable {
         superwallAPIKey = bundle.object(forInfoDictionaryKey: "SuperwallAPIKey") as? String ?? ""
         googleClientID = bundle.object(forInfoDictionaryKey: "GoogleClientID") as? String ?? ""
         googleReversedClientID = bundle.object(forInfoDictionaryKey: "GoogleReversedClientID") as? String ?? ""
+        privacyPolicyURL = AppConfiguration.url(for: "PrivacyPolicyURL", in: bundle)
+        termsOfServiceURL = AppConfiguration.url(for: "TermsOfServiceURL", in: bundle)
 
         if
             let rawURL = bundle.object(forInfoDictionaryKey: "APIBaseURL") as? String,
@@ -39,5 +43,16 @@ struct AppConfiguration: Sendable {
         } else {
             aiAPIBaseURL = nil
         }
+    }
+
+    private static func url(for key: String, in bundle: Bundle) -> URL? {
+        guard
+            let rawValue = bundle.object(forInfoDictionaryKey: key) as? String,
+            rawValue.contains("://"),
+            let url = URL(string: rawValue)
+        else {
+            return nil
+        }
+        return url
     }
 }

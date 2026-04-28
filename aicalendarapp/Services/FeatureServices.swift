@@ -246,8 +246,9 @@ final class CalendarSyncService: CalendarSyncServicing {
 
         let selectedSet = Set(selectedCalendarIDs)
         let calendars = eventStore.calendars(for: .event).filter { selectedSet.contains($0.calendarIdentifier) }
-        let startDate = Calendar.current.date(byAdding: .day, value: -7, to: Calendar.current.startOfDay(for: .now)) ?? .now
-        let endDate = Calendar.current.date(byAdding: .day, value: 90, to: startDate) ?? .now
+        let today = Calendar.current.startOfDay(for: .now)
+        let startDate = Calendar.current.date(byAdding: .day, value: -7, to: today) ?? today
+        let endDate = Calendar.current.date(byAdding: .day, value: 90, to: today) ?? today
         let predicate = eventStore.predicateForEvents(withStart: startDate, end: endDate, calendars: calendars)
         let events = eventStore.events(matching: predicate)
 

@@ -1,64 +1,69 @@
 import { z } from "zod";
 
 const looseObject = z.object({}).passthrough();
+const userIDSchema = z.string().trim().min(1).max(128);
+const assistantMessageSchema = z.string().trim().min(1).max(2000);
+const reflectionPromptSchema = z.string().trim().min(1).max(4000);
+const syllabusTextSchema = z.string().trim().min(1).max(120000);
+const sourceNameSchema = z.string().trim().min(1).max(256);
 
 export const assistantRequestSchema = z.object({
-  userID: z.string().min(1),
-  message: z.string().min(1),
+  userID: userIDSchema,
+  message: assistantMessageSchema,
   snapshot: looseObject,
-  goals: z.array(looseObject)
+  goals: z.array(looseObject).max(25)
 });
 
 export const goalPlanRequestSchema = z.object({
-  userID: z.string().min(1),
+  userID: userIDSchema,
   goal: looseObject,
   timelineWeeks: z.number().int().positive().max(52)
 });
 
 export const vibeFeedbackRequestSchema = z.object({
-  userID: z.string().min(1),
-  prompt: z.string().min(1)
+  userID: userIDSchema,
+  prompt: reflectionPromptSchema
 });
 
 export const assistantDraftCommitSchema = z.object({
-  userID: z.string().min(1),
+  userID: userIDSchema,
   action: looseObject.extend({
-    id: z.string().min(1),
-    kind: z.string().min(1)
+    id: z.string().trim().min(1).max(128),
+    kind: z.string().trim().min(1).max(64)
   })
 });
 
 export const importTextRequestSchema = z.object({
-  userID: z.string().min(1),
-  text: z.string().min(1)
+  userID: userIDSchema,
+  text: syllabusTextSchema
 });
 
 export const importFileRequestSchema = z.object({
-  userID: z.string().min(1),
-  sourceName: z.string().min(1),
-  uploadedPath: z.string().optional().nullable(),
-  extractedText: z.string().default("")
+  userID: userIDSchema,
+  sourceName: sourceNameSchema,
+  uploadedPath: z.string().trim().max(1024).optional().nullable(),
+  extractedText: z.string().trim().max(120000).default("")
 });
 
 export const importCommitSchema = z.object({
-  userID: z.string().min(1),
+  userID: userIDSchema,
   job: looseObject.extend({
-    id: z.string().min(1),
+    id: z.string().trim().min(1).max(128),
     extractedCourses: z.array(looseObject).default([]),
     extractedAssignments: z.array(looseObject).default([])
   })
 });
 
 export const deleteImportSchema = z.object({
-  userID: z.string().min(1),
+  userID: userIDSchema,
   job: looseObject.extend({
-    id: z.string().min(1),
-    uploadedFilePath: z.string().optional().nullable()
+    id: z.string().trim().min(1).max(128),
+    uploadedFilePath: z.string().trim().max(1024).optional().nullable()
   })
 });
 
 export const userJobRequestSchema = z.object({
-  userID: z.string().min(1)
+  userID: userIDSchema
 });
 
 export type AssistantRequest = z.infer<typeof assistantRequestSchema>;

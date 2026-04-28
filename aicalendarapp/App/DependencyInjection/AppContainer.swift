@@ -115,7 +115,9 @@ final class AppContainer {
         NotificationService.shared.authService = authService
         NotificationService.shared.databaseService = databaseService
         NotificationService.shared.userService = userService
+        NotificationService.shared.startAuthStateSync()
         SubscriptionService.shared.analyticsService = analyticsService
+        SubscriptionService.shared.backendFunctionService = backendFunctionService
         PaywallService.shared.subscriptionService = subscriptionService
         PaywallService.shared.analyticsService = analyticsService
         PaywallService.shared.configuration = configuration

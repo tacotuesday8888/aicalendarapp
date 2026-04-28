@@ -35,9 +35,26 @@
 		F0D2A002B7D24E51900AA102 /* aicalendarapp/Resources/Config/Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = aicalendarapp/Resources/Config/Release.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		F0D2A020B7D24E51900AA120 /* Exceptions for "aicalendarapp" folder in "aicalendarapp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Resources/Config/Debug.xcconfig,
+				Resources/Config/GoogleService-Info.plist.template,
+				Resources/Config/Release.xcconfig,
+				Resources/Config/Secrets.template.xcconfig,
+				Resources/Config/Secrets.xcconfig,
+			);
+			target = 2D6913A22F8C291A00FC26B8 /* aicalendarapp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2D6913A52F8C291A00FC26B8 /* aicalendarapp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				F0D2A020B7D24E51900AA120 /* Exceptions for "aicalendarapp" folder in "aicalendarapp" target */,
+			);
 			path = aicalendarapp;
 			sourceTree = "<group>";
 		};

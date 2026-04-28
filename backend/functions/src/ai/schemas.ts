@@ -10,10 +10,10 @@ export const aiWorkflowSchema = z.enum([
 const looseObjectSchema = z.record(z.any()).default({});
 
 export const assistantChatPayloadSchema = z.object({
-  message: z.string().trim().min(1),
-  timezone: z.string().trim().min(1),
-  currentScreen: z.string().trim().optional().nullable(),
-  date: z.string().trim().optional().nullable(),
+  message: z.string().trim().min(1).max(2000),
+  timezone: z.string().trim().min(1).max(64),
+  currentScreen: z.string().trim().max(128).optional().nullable(),
+  date: z.string().trim().max(64).optional().nullable(),
   contextHints: looseObjectSchema
 });
 
@@ -30,16 +30,16 @@ export const assistantChatResultSchema = z.object({
 });
 
 export const goalDetailsSchema = z.object({
-  title: z.string().trim().min(1),
-  description: z.string().trim().default("")
+  title: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(2000).default("")
 });
 
 export const goalPlanGenerationPayloadSchema = z.object({
-  goalID: z.string().trim().min(1).optional().nullable(),
+  goalID: z.string().trim().min(1).max(128).optional().nullable(),
   goal: goalDetailsSchema.optional().nullable(),
   timelineWeeks: z.number().int().positive().max(104),
-  startDate: z.string().trim().min(1),
-  timezone: z.string().trim().min(1)
+  startDate: z.string().trim().min(1).max(64),
+  timezone: z.string().trim().min(1).max(64)
 });
 
 export const goalMilestoneSchema = z.object({
@@ -61,8 +61,8 @@ export const goalPlanGenerationResultSchema = z.object({
 });
 
 export const vibeFeedbackPayloadSchema = z.object({
-  reflectionText: z.string().trim().min(1),
-  timezone: z.string().trim().min(1),
+  reflectionText: z.string().trim().min(1).max(4000),
+  timezone: z.string().trim().min(1).max(64),
   recentContext: looseObjectSchema.optional()
 });
 
@@ -72,11 +72,11 @@ export const vibeFeedbackResultSchema = z.object({
 });
 
 export const syllabusImportPayloadSchema = z.object({
-  extractedText: z.string().trim().min(1),
-  currentDate: z.string().trim().optional().nullable(),
-  timezone: z.string().trim().min(1),
-  sourceName: z.string().trim().optional().nullable(),
-  uploadedFilePath: z.string().trim().optional().nullable()
+  extractedText: z.string().trim().min(1).max(120000),
+  currentDate: z.string().trim().max(64).optional().nullable(),
+  timezone: z.string().trim().min(1).max(64),
+  sourceName: z.string().trim().max(256).optional().nullable(),
+  uploadedFilePath: z.string().trim().max(1024).optional().nullable()
 });
 
 export const syllabusAssignmentSchema = z.object({

@@ -4,6 +4,9 @@ import UserNotifications
 #if canImport(FirebaseAnalytics)
 import FirebaseAnalytics
 #endif
+#if canImport(FirebaseAppCheck)
+import FirebaseAppCheck
+#endif
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
@@ -66,17 +69,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     private func configureFirebaseIfAvailable() {
         #if canImport(FirebaseCore)
-        let configPath = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist")
-            ?? Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist.template")
+        let configPath = firebaseConfigurationPath()
         guard
             let configPath,
             let options = FirebaseOptions(contentsOfFile: configPath)
         else {
+            #if DEBUG
             logger.notice("Firebase config file missing or invalid. Running with local infrastructure adapters.")
             return
+            #else
+            fatalError("Firebase configuration is required for non-debug builds.")
+            #endif
         }
 
         if FirebaseApp.app() == nil {
+            configureAppCheckIfAvailable()
             FirebaseApp.configure(options: options)
             #if canImport(FirebaseFirestore)
             let settings = Firestore.firestore().settings
@@ -90,18 +97,39 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #endif
     }
 
+    #if canImport(FirebaseCore)
+    private func configureAppCheckIfAvailable() {
+        #if canImport(FirebaseAppCheck)
+        #if DEBUG
+        AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
+        logger.info("Configured Firebase App Check debug provider.")
+        #else
+        AppCheck.setAppCheckProviderFactory(AICalendarAppCheckProviderFactory())
+        logger.info("Configured Firebase App Check App Attest provider.")
+        #endif
+        #endif
+    }
+
+    private func firebaseConfigurationPath() -> String? {
+        Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist")
+    }
+    #endif
+
     private func configureRevenueCatIfAvailable() {
         let apiKey = configuration.revenueCatAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !apiKey.isEmpty else {
+            #if DEBUG
             logger.notice("RevenueCat API key missing from configuration.")
             return
+            #else
+            fatalError("RevenueCat API key is required for non-debug builds.")
+            #endif
         }
 
         #if canImport(RevenueCat)
         #if !DEBUG
         guard !apiKey.hasPrefix("test_") else {
-            logger.notice("RevenueCat Test Store API key detected in a non-debug build. Provide the iOS public SDK key before shipping.")
-            return
+            fatalError("RevenueCat Test Store API key cannot be used in non-debug builds.")
         }
         #endif
 
@@ -123,7 +151,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Purchases.shared.delegate = self
         logger.info("Configured RevenueCat.")
         #else
+        #if DEBUG
         logger.notice("RevenueCat SDK not linked.")
+        #else
+        fatalError("RevenueCat SDK is required for non-debug builds.")
+        #endif
         #endif
     }
 
@@ -177,6 +209,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UICollectionView.appearance().backgroundColor = .clear
     }
 }
+
+#if canImport(FirebaseAppCheck) && canImport(FirebaseCore)
+private final class AICalendarAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+    func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+        AppAttestProvider(app: app) ?? DeviceCheckProvider(app: app)
+    }
+}
+#endif
 
 #if canImport(FirebaseMessaging)
 extension AppDelegate: MessagingDelegate {

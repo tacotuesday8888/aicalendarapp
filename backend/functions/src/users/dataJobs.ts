@@ -1,9 +1,10 @@
 import { getAuth } from "firebase-admin/auth";
+import { FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 
 import { userJobRequestSchema } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
-import { db, normalizeFirestoreValue, userDoc, userScopedCollection } from "../shared/firestore.js";
+import { db, normalizeFirestoreValue, serverTimestamp, userDoc, userScopedCollection } from "../shared/firestore.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 
 const exportCollections = [
@@ -21,57 +22,62 @@ const exportCollections = [
   "assistantThreads",
   "imports",
   "subscriptions",
+  "aiDrafts",
   "aiUsage",
+  "aiUsageDaily",
   "aiUsageLogs",
   "assistantDraftArtifacts"
 ];
+const revenueCatWebhookEventsCollection = "_revenuecatWebhookEvents";
 
 export const exportUserData = onAuthenticatedJsonRequest(userJobRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
   const profileSnapshot = await userDoc(userID).get();
-  const exportedCollections = await Promise.all(
-    exportCollections.map(async (collection) => {
-      const records = await exportCollection(userID, collection);
-      return [collection, records] as const;
-    })
-  );
+  const [exportedCollections, revenueCatWebhookEvents] = await Promise.all([
+    Promise.all(
+      exportCollections.map(async (collection) => {
+        const records = await exportCollection(userID, collection);
+        return [collection, records] as const;
+      })
+    ),
+    exportRevenueCatWebhookEvents(userID)
+  ]);
 
   return {
     userID,
     requestedAt: new Date().toISOString(),
     profile: normalizeFirestoreValue(profileSnapshot.data() ?? {}),
-    collections: Object.fromEntries(exportedCollections)
+    collections: Object.fromEntries(exportedCollections),
+    systemCollections: {
+      revenueCatWebhookEvents
+    }
   };
 });
 
 export const deleteUserAccount = onAuthenticatedJsonRequest(userJobRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
-  const uploadedImportFiles = await collectUploadedImportFiles(userID);
-  const deletedCollections = await Promise.all(
-    exportCollections.map(async (collection) => {
-      const deletedCount = await deleteCollection(userID, collection);
-      return [collection, deletedCount] as const;
-    })
-  );
+  const deletedStoragePrefix = await deleteUserStorageFiles(userID);
+  const [deletedCollections, redactedRevenueCatWebhookEvents] = await Promise.all([
+    Promise.all(
+      exportCollections.map(async (collection) => {
+        const deletedCount = await deleteCollection(userID, collection);
+        return [collection, deletedCount] as const;
+      })
+    ),
+    redactUserIDFromRevenueCatWebhookEvents(userID)
+  ]);
 
-  await Promise.all(
-    uploadedImportFiles.map(async (path) => {
-      try {
-        await getStorage().bucket().file(path).delete();
-      } catch {
-        // Ignore missing files so account deletion can complete.
-      }
-    })
-  );
-
-  await userDoc(userID).delete().catch(() => undefined);
-  await getAuth().deleteUser(userID).catch(() => undefined);
+  await userDoc(userID).delete();
+  await deleteAuthUserIfPresent(userID);
 
   return {
     success: true,
     userID,
     deletedCollections: Object.fromEntries(deletedCollections),
-    deletedUploadedFiles: uploadedImportFiles.length
+    redactedSystemCollections: {
+      revenueCatWebhookEvents: redactedRevenueCatWebhookEvents
+    },
+    deletedStoragePrefix
   };
 });
 
@@ -94,14 +100,10 @@ async function exportCollection(userID: string, collection: string) {
   });
 }
 
-async function collectUploadedImportFiles(userID: string): Promise<string[]> {
-  const snapshot = await userScopedCollection(userID, "imports").get();
-  return snapshot.docs
-    .map((document) => {
-      const uploadedFilePath = document.data().uploadedFilePath;
-      return typeof uploadedFilePath === "string" && uploadedFilePath.length ? uploadedFilePath : null;
-    })
-    .filter((value): value is string => value !== null);
+async function deleteUserStorageFiles(userID: string): Promise<string> {
+  const prefix = `users/${userID}/`;
+  await getStorage().bucket().deleteFiles({ prefix, force: true });
+  return prefix;
 }
 
 async function deleteCollection(userID: string, collection: string): Promise<number> {
@@ -117,6 +119,48 @@ async function deleteCollection(userID: string, collection: string): Promise<num
   return snapshot.size;
 }
 
+async function exportRevenueCatWebhookEvents(userID: string) {
+  const snapshot = await db.collection(revenueCatWebhookEventsCollection)
+    .where("userIDs", "array-contains", userID)
+    .get();
+
+  return snapshot.docs.map((document) => {
+    const normalized = normalizeFirestoreValue(document.data());
+
+    if (normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
+      return {
+        id: document.id,
+        ...(normalized as Record<string, unknown>),
+        userIDs: [userID]
+      };
+    }
+
+    return {
+      id: document.id,
+      userIDs: [userID],
+      value: normalized
+    };
+  });
+}
+
+async function redactUserIDFromRevenueCatWebhookEvents(userID: string): Promise<number> {
+  const snapshot = await db.collection(revenueCatWebhookEventsCollection)
+    .where("userIDs", "array-contains", userID)
+    .get();
+  const chunks = chunk(snapshot.docs, 400);
+
+  for (const documents of chunks) {
+    const batch = db.batch();
+    documents.forEach((document) => batch.update(document.ref, {
+      userIDs: FieldValue.arrayRemove(userID),
+      redactedAt: serverTimestamp()
+    }));
+    await batch.commit();
+  }
+
+  return snapshot.size;
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
 
@@ -125,4 +169,24 @@ function chunk<T>(items: T[], size: number): T[][] {
   }
 
   return chunks;
+}
+
+async function deleteAuthUserIfPresent(userID: string): Promise<void> {
+  try {
+    await getAuth().deleteUser(userID);
+  } catch (error) {
+    if (firebaseAuthErrorCode(error) === "auth/user-not-found") {
+      return;
+    }
+    throw error;
+  }
+}
+
+function firebaseAuthErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
 }

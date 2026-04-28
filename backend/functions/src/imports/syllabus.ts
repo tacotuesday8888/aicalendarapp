@@ -1,4 +1,6 @@
 import { getStorage } from "firebase-admin/storage";
+import { logger } from "firebase-functions/v2";
+import { HttpsError } from "firebase-functions/v2/https";
 
 import {
   deleteImportSchema,
@@ -10,6 +12,7 @@ import { requireMatchingUser } from "../shared/context.js";
 import { db, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 import { createAIProvider, isAIDisabledResponse } from "../ai/provider.js";
+import { authorizeAndReserveAIUsage, enforceAIPremiumAccess, logAIUsage } from "../ai/usage.js";
 
 type ParsedImport = {
   courses: Array<{
@@ -32,12 +35,15 @@ type ParsedImport = {
 
 export const importSyllabusText = onAuthenticatedJsonRequest(importTextRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
+  await authorizeAndReserveAIUsage(userID, "syllabus_import");
 
   return createImportJob(userID, data.text, "text-import");
 });
 
 export const importSyllabusFile = onAuthenticatedJsonRequest(importFileRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
+  await enforceAIPremiumAccess(userID, "syllabus_import");
+
   const extractedText = (data.extractedText ?? "").trim();
 
   if (!extractedText) {
@@ -49,6 +55,7 @@ export const importSyllabusFile = onAuthenticatedJsonRequest(importFileRequestSc
     );
   }
 
+  await authorizeAndReserveAIUsage(userID, "syllabus_import");
   return createImportJob(userID, extractedText, data.sourceName, data.uploadedPath ?? null);
 });
 
@@ -57,12 +64,14 @@ export const commitImportJob = onAuthenticatedJsonRequest(importCommitSchema, as
   const imports = userScopedCollection(userID, "imports");
   const importRef = imports.doc(data.job.id);
   const importSnapshot = await importRef.get();
-  const extractedCourses = data.job.extractedCourses ?? [];
-  const extractedAssignments = data.job.extractedAssignments ?? [];
 
   if (!importSnapshot.exists) {
-    throw new Error("Import job not found.");
+    throw new HttpsError("not-found", "Import job not found.");
   }
+
+  const importJob = importSnapshot.data() ?? {};
+  const extractedCourses = arrayOfRecords(importJob.extractedCourses);
+  const extractedAssignments = arrayOfRecords(importJob.extractedAssignments);
 
   const batch = db.batch();
   const coursesCollection = userScopedCollection(userID, "courses");
@@ -96,16 +105,28 @@ export const commitImportJob = onAuthenticatedJsonRequest(importCommitSchema, as
 
 export const deleteImportJob = onAuthenticatedJsonRequest(deleteImportSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
+  const importRef = userScopedCollection(userID, "imports").doc(data.job.id);
+  const importSnapshot = await importRef.get();
 
-  if (data.job.uploadedFilePath) {
+  if (!importSnapshot.exists) {
+    throw new HttpsError("not-found", "Import job not found.");
+  }
+
+  const uploadedFilePath = safeUserImportStoragePath(userID, importSnapshot.get("uploadedFilePath"));
+  if (uploadedFilePath) {
     try {
-      await getStorage().bucket().file(data.job.uploadedFilePath).delete();
+      await getStorage().bucket().file(uploadedFilePath).delete();
     } catch {
       // Ignore missing files so metadata cleanup can still complete.
     }
+  } else if (importSnapshot.get("uploadedFilePath")) {
+    logger.warn("Skipped import file deletion because stored path was outside the user import prefix.", {
+      userID,
+      importID: data.job.id
+    });
   }
 
-  await userScopedCollection(userID, "imports").doc(data.job.id).delete();
+  await importRef.delete();
   return { success: true };
 });
 
@@ -131,6 +152,7 @@ async function createImportJob(userID: string, rawText: string, sourceName: stri
     status: "completed",
     createdAt: serverTimestamp()
   });
+  await logAIUsage(userID, "syllabus_import", "success", { sourceName });
 
   return {
     ...job,
@@ -295,6 +317,26 @@ function sanitizeID(rawID: unknown): string | null {
   }
   // Firestore document IDs cannot contain "/" or be empty; replace risky chars.
   return trimmed.replace(/\//g, "_");
+}
+
+function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is Record<string, unknown> => {
+    return item !== null && typeof item === "object" && !Array.isArray(item);
+  });
+}
+
+function safeUserImportStoragePath(userID: string, value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim().replace(/^\/+/, "");
+  const prefix = `users/${userID}/imports/`;
+  return trimmed.startsWith(prefix) ? trimmed : null;
 }
 
 function parseJSONObject(rawText: string): unknown {
