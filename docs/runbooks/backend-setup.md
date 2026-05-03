@@ -5,14 +5,14 @@
 1. Install Node.js 20 and use `npx -y firebase-tools@latest` for Firebase CLI commands.
 2. Copy `.firebaserc.template` to `.firebaserc` and set your Firebase project IDs.
 3. Install dependencies in `backend/functions`.
-4. Copy `aicalendarapp/Resources/Config/Secrets.template.xcconfig` to `aicalendarapp/Resources/Config/Secrets.xcconfig` for local overrides and fill in:
+4. Copy `iOSApp/Resources/Config/Secrets.template.xcconfig` to `iOSApp/Resources/Config/Secrets.xcconfig` for local overrides and fill in:
    - `API_BASE_URL`
    - `AI_API_BASE_URL`
    - `REVENUECAT_API_KEY`
    - `SUPERWALL_API_KEY`
    - `GOOGLE_CLIENT_ID`
    - `GOOGLE_REVERSED_CLIENT_ID`
-5. Add a real `GoogleService-Info.plist` from the Firebase console to `aicalendarapp/Resources/Config/` for local Firebase initialization, and make sure it matches the registered iOS app bundle ID.
+5. Add a real `GoogleService-Info.plist` from the Firebase console to `iOSApp/Resources/Config/` for local Firebase initialization, and make sure it matches the registered iOS app bundle ID.
 6. Set `API_BASE_URL` to your Firebase Functions root, for example:
    - `https://us-central1-your-project-id.cloudfunctions.net/`
    Set `AI_API_BASE_URL` to the same Firebase Functions root for the Genkit AI router:

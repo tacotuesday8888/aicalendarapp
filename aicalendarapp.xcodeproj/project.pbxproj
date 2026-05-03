@@ -31,12 +31,12 @@
 		2D6913A32F8C291A00FC26B8 /* aicalendarapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = aicalendarapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2D6913B02F8C291C00FC26B8 /* aicalendarappTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = aicalendarappTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2D6913BA2F8C291C00FC26B8 /* aicalendarappUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = aicalendarappUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		F0D2A001B7D24E51900AA101 /* aicalendarapp/Resources/Config/Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = aicalendarapp/Resources/Config/Debug.xcconfig; sourceTree = SOURCE_ROOT; };
-		F0D2A002B7D24E51900AA102 /* aicalendarapp/Resources/Config/Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = aicalendarapp/Resources/Config/Release.xcconfig; sourceTree = SOURCE_ROOT; };
+		F0D2A001B7D24E51900AA101 /* iOSApp/Resources/Config/Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = iOSApp/Resources/Config/Debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		F0D2A002B7D24E51900AA102 /* iOSApp/Resources/Config/Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = iOSApp/Resources/Config/Release.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		F0D2A020B7D24E51900AA120 /* Exceptions for "aicalendarapp" folder in "aicalendarapp" target */ = {
+		F0D2A020B7D24E51900AA120 /* Exceptions for "iOSApp" folder in "aicalendarapp" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Resources/Config/Debug.xcconfig,
@@ -50,22 +50,22 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		2D6913A52F8C291A00FC26B8 /* aicalendarapp */ = {
+		2D6913A52F8C291A00FC26B8 /* iOSApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				F0D2A020B7D24E51900AA120 /* Exceptions for "aicalendarapp" folder in "aicalendarapp" target */,
+				F0D2A020B7D24E51900AA120 /* Exceptions for "iOSApp" folder in "aicalendarapp" target */,
 			);
-			path = aicalendarapp;
+			path = iOSApp;
 			sourceTree = "<group>";
 		};
-		2D6913B32F8C291C00FC26B8 /* aicalendarappTests */ = {
+		2D6913B32F8C291C00FC26B8 /* iOSAppTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = aicalendarappTests;
+			path = iOSAppTests;
 			sourceTree = "<group>";
 		};
-		2D6913BD2F8C291C00FC26B8 /* aicalendarappUITests */ = {
+		2D6913BD2F8C291C00FC26B8 /* iOSAppUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = aicalendarappUITests;
+			path = iOSAppUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -99,12 +99,12 @@
 		2D69139A2F8C291A00FC26B8 = {
 			isa = PBXGroup;
 			children = (
-				2D6913A52F8C291A00FC26B8 /* aicalendarapp */,
-				2D6913B32F8C291C00FC26B8 /* aicalendarappTests */,
-				2D6913BD2F8C291C00FC26B8 /* aicalendarappUITests */,
+				2D6913A52F8C291A00FC26B8 /* iOSApp */,
+				2D6913B32F8C291C00FC26B8 /* iOSAppTests */,
+				2D6913BD2F8C291C00FC26B8 /* iOSAppUITests */,
 				2D6913A42F8C291A00FC26B8 /* Products */,
-				F0D2A001B7D24E51900AA101 /* aicalendarapp/Resources/Config/Debug.xcconfig */,
-				F0D2A002B7D24E51900AA102 /* aicalendarapp/Resources/Config/Release.xcconfig */,
+				F0D2A001B7D24E51900AA101 /* iOSApp/Resources/Config/Debug.xcconfig */,
+				F0D2A002B7D24E51900AA102 /* iOSApp/Resources/Config/Release.xcconfig */,
 			);
 			sourceTree = "<group>";
 		};
@@ -134,7 +134,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				2D6913A52F8C291A00FC26B8 /* aicalendarapp */,
+				2D6913A52F8C291A00FC26B8 /* iOSApp */,
 			);
 			name = aicalendarapp;
 			packageProductDependencies = (
@@ -158,7 +158,7 @@
 				2D6913B22F8C291C00FC26B8 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				2D6913B32F8C291C00FC26B8 /* aicalendarappTests */,
+				2D6913B32F8C291C00FC26B8 /* iOSAppTests */,
 			);
 			name = aicalendarappTests;
 			packageProductDependencies = (
@@ -181,7 +181,7 @@
 				2D6913BC2F8C291C00FC26B8 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				2D6913BD2F8C291C00FC26B8 /* aicalendarappUITests */,
+				2D6913BD2F8C291C00FC26B8 /* iOSAppUITests */,
 			);
 			name = aicalendarappUITests;
 			packageProductDependencies = (
@@ -420,11 +420,11 @@
 		};
 		2D6913C52F8C291C00FC26B8 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = F0D2A001B7D24E51900AA101 /* aicalendarapp/Resources/Config/Debug.xcconfig */;
+			baseConfigurationReference = F0D2A001B7D24E51900AA101 /* iOSApp/Resources/Config/Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = aicalendarapp/aicalendarapp.entitlements;
+				CODE_SIGN_ENTITLEMENTS = iOSApp/aicalendarapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
@@ -454,11 +454,11 @@
 		};
 		2D6913C62F8C291C00FC26B8 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = F0D2A002B7D24E51900AA102 /* aicalendarapp/Resources/Config/Release.xcconfig */;
+			baseConfigurationReference = F0D2A002B7D24E51900AA102 /* iOSApp/Resources/Config/Release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = aicalendarapp/aicalendarapp.entitlements;
+				CODE_SIGN_ENTITLEMENTS = iOSApp/aicalendarapp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;

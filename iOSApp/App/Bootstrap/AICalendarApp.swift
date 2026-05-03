@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct aicalendarappApp: App {
+struct AICalendarApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var sessionViewModel: AppSessionViewModel
     private let container: AppContainer

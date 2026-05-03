@@ -1,6 +1,6 @@
 //
-//  aicalendarappTests.swift
-//  aicalendarappTests
+//  IOSAppTests.swift
+//  iOSAppTests
 //
 //  Created by Langqi Zhao on 4/12/26.
 //
@@ -399,7 +399,7 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
 }
 
 @MainActor
-struct aicalendarappTests {
+struct IOSAppTests {
     private func uniqueUserID(_ prefix: String = "test-user") -> String {
         "\(prefix)-\(UUID().uuidString)"
     }

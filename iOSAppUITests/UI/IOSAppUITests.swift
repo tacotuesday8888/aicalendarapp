@@ -1,13 +1,13 @@
 //
-//  aicalendarappUITests.swift
-//  aicalendarappUITests
+//  IOSAppUITests.swift
+//  iOSAppUITests
 //
 //  Created by Langqi Zhao on 4/12/26.
 //
 
 import XCTest
 
-final class aicalendarappUITests: XCTestCase {
+final class IOSAppUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false

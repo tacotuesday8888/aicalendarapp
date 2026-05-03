@@ -1,13 +1,13 @@
 //
-//  aicalendarappUITestsLaunchTests.swift
-//  aicalendarappUITests
+//  IOSAppUITestsLaunchTests.swift
+//  iOSAppUITests
 //
 //  Created by Langqi Zhao on 4/12/26.
 //
 
 import XCTest
 
-final class aicalendarappUITestsLaunchTests: XCTestCase {
+final class IOSAppUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

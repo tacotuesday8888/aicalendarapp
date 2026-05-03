@@ -4,7 +4,7 @@ AI Efficiency Calendar App is an iPhone-first SwiftUI planning app for students.
 
 ## Project Structure
 
-- `aicalendarapp/` - SwiftUI iOS app source, features, services, design system, and app resources.
+- `iOSApp/` - SwiftUI iOS app source, features, services, design system, and app resources.
 - `aicalendarapp.xcodeproj/` - Xcode project.
 - `backend/functions/` - Firebase Cloud Functions for privileged server work.
 - `backend/ai-service/` - Inactive FastAPI AI service prototype retained for reference; v1 AI uses Firebase Functions + Genkit.
@@ -28,15 +28,15 @@ The app can fall back to local/demo-safe behavior when some live services are mi
 These files are intentionally ignored by Git:
 
 - `.firebaserc` - local Firebase project aliases.
-- `aicalendarapp/Resources/Config/GoogleService-Info.plist` - real Firebase iOS app config.
-- `aicalendarapp/Resources/Config/Secrets.xcconfig` - local app secrets and service IDs.
+- `iOSApp/Resources/Config/GoogleService-Info.plist` - real Firebase iOS app config.
+- `iOSApp/Resources/Config/Secrets.xcconfig` - local app secrets and service IDs.
 - `backend/functions/.env.*` - local Firebase Functions environment files.
 
 Use the templates in the repo as starting points:
 
 - `.firebaserc.template`
-- `aicalendarapp/Resources/Config/GoogleService-Info.plist.template`
-- `aicalendarapp/Resources/Config/Secrets.template.xcconfig`
+- `iOSApp/Resources/Config/GoogleService-Info.plist.template`
+- `iOSApp/Resources/Config/Secrets.template.xcconfig`
 - `backend/config/.env.example`
 
 ## Backend Basics
