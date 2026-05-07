@@ -61,8 +61,7 @@ export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema
   return draft;
 }, aiFunctionOptions);
 
-export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCommitSchema, async ({ authUID, data, request }) => {
-  logLegacyAIEndpointUse("commitAssistantDraft", authUID, request);
+export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCommitSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
 
   await confirmDraftArtifact(userID, data);
