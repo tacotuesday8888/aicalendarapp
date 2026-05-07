@@ -62,7 +62,6 @@ protocol AssistantServicing: AnyObject {
 protocol BackendFunctionServicing: AnyObject {
     func assistantRespond(_ request: AssistantRequestPayload) async throws -> AssistantThread
     func generateGoalPlan(_ request: GoalPlanRequestPayload) async throws -> GoalPlanDraft
-    func generateVibeFeedback(_ request: VibeFeedbackRequestPayload) async throws -> VibeFeedbackResponsePayload
     func commitAssistantDraft(_ request: AssistantDraftCommitPayload) async throws
     func importSyllabusText(_ request: ImportTextRequestPayload) async throws -> ImportJob
     func importSyllabusFile(_ request: ImportFileRequestPayload) async throws -> ImportJob

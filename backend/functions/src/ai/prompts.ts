@@ -1,4 +1,4 @@
-import type { AssistantRequest, GoalPlanRequest, VibeFeedbackRequest } from "../shared/contracts.js";
+import type { AssistantRequest, GoalPlanRequest } from "../shared/contracts.js";
 
 export function buildAssistantSystemPrompt(): string {
   return [
@@ -26,14 +26,6 @@ export function buildGoalPlanPrompt(request: GoalPlanRequest): string {
       "Create a realistic milestone plan for this goal. Return JSON with: summary (1-2 sentence overview), checkpoints (array of {title, dueDate in ISO8601} spread across the timeline), nextActions (array of 3-5 {title, isComplete: false} immediate next steps). Return ONLY valid JSON.",
     timelineWeeks: request.timelineWeeks,
     goal: request.goal
-  });
-}
-
-export function buildVibeFeedbackPrompt(request: VibeFeedbackRequest): string {
-  return fencedRequestJSON("vibe_feedback", {
-    instruction:
-      "You are a supportive student productivity coach. Reply with one short paragraph of practical feedback based on the student's current vibe. Keep it grounded, non-clinical, and action-oriented. Return plain text only.",
-    prompt: request.prompt
   });
 }
 

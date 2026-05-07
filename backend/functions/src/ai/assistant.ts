@@ -4,11 +4,9 @@ import {
   assistantDraftCommitSchema,
   assistantRequestSchema,
   goalPlanRequestSchema,
-  vibeFeedbackRequestSchema,
   type AssistantDraftCommitRequest,
   type AssistantRequest,
-  type GoalPlanRequest,
-  type VibeFeedbackRequest
+  type GoalPlanRequest
 } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
 import { serverTimestamp, userScopedCollection } from "../shared/firestore.js";
@@ -19,8 +17,7 @@ import { AI_DISABLED_MESSAGE, createAIProvider, isAIDisabledResponse } from "./p
 import {
   buildAssistantSystemPrompt,
   buildAssistantUserPrompt,
-  buildGoalPlanPrompt,
-  buildVibeFeedbackPrompt
+  buildGoalPlanPrompt
 } from "./prompts.js";
 import { crisisSafetyFeedback } from "./safety.js";
 import { authorizeAndReserveAIUsage, logAIUsage } from "./usage.js";
@@ -62,17 +59,6 @@ export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema
   const draft = await createGoalPlanDraft(userID, data);
   await logAIUsage(userID, "goal_plan_generation", "success");
   return draft;
-}, aiFunctionOptions);
-
-export const generateVibeFeedback = onAuthenticatedJsonRequest(vibeFeedbackRequestSchema, async ({ authUID, data, request }) => {
-  logLegacyAIEndpointUse("generateVibeFeedback", authUID, request);
-  const userID = requireMatchingUser(authUID, data.userID);
-  await authorizeAndReserveAIUsage(userID, "vibe_feedback");
-
-  const feedback = await createVibeFeedback(data);
-  await logAIUsage(userID, "vibe_feedback", "success");
-
-  return { feedback };
 }, aiFunctionOptions);
 
 export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCommitSchema, async ({ authUID, data, request }) => {
@@ -241,26 +227,6 @@ async function createGoalPlanDraft(userID: string, request: GoalPlanRequest) {
   ]);
 
   return draft;
-}
-
-async function createVibeFeedback(request: VibeFeedbackRequest): Promise<string> {
-  const safetyFeedback = crisisSafetyFeedback(request.prompt);
-  if (safetyFeedback) {
-    return safetyFeedback;
-  }
-
-  const provider = createAIProvider();
-  const response = await provider.complete({
-    system: buildAssistantSystemPrompt(),
-    user: buildVibeFeedbackPrompt(request)
-  });
-
-  if (isAIDisabledResponse(response.text)) {
-    return "AI setup is not enabled yet. Save a quick check-in and keep using the planner while the AI provider is still undecided.";
-  }
-
-  const feedback = response.text.trim() || "Take one small next step that lowers friction for the next hour.";
-  return crisisSafetyFeedback(feedback) ?? feedback;
 }
 
 async function confirmDraftArtifact(userID: string, request: AssistantDraftCommitRequest) {

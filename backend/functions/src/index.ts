@@ -1,5 +1,5 @@
 export { ai } from "./ai/router.js";
-export { assistantRespond, commitAssistantDraft, generateGoalPlan, generateVibeFeedback } from "./ai/assistant.js";
+export { assistantRespond, commitAssistantDraft, generateGoalPlan } from "./ai/assistant.js";
 export { cleanupAIUsageDocs } from "./ai/usageCleanup.js";
 export { revenueCatWebhook, syncRevenueCatSubscription } from "./billing/revenuecat.js";
 export { commitImportJob, deleteImportJob, importSyllabusFile, importSyllabusText } from "./imports/syllabus.js";

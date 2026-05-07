@@ -360,10 +360,6 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
         throw AppError.network(description: "Not implemented in test.")
     }
 
-    func generateVibeFeedback(_ request: VibeFeedbackRequestPayload) async throws -> VibeFeedbackResponsePayload {
-        throw AppError.network(description: "Not implemented in test.")
-    }
-
     func commitAssistantDraft(_ request: AssistantDraftCommitPayload) async throws {}
 
     func importSyllabusText(_ request: ImportTextRequestPayload) async throws -> ImportJob {
@@ -913,16 +909,6 @@ struct IOSAppTests {
 
         await #expect(throws: AppError.self) {
             try await service.exportUserData(UserJobRequestPayload(userID: uniqueUserID("export")))
-        }
-    }
-
-    @Test func vibeFeedbackRequiresLiveBackendInsteadOfLocalFallback() async {
-        let service = BackendFunctionService()
-
-        await #expect(throws: AppError.self) {
-            try await service.generateVibeFeedback(
-                VibeFeedbackRequestPayload(userID: uniqueUserID("vibe-safety"), prompt: "I want to die")
-            )
         }
     }
 

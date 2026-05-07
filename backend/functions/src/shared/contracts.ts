@@ -3,7 +3,6 @@ import { z } from "zod";
 const looseObject = z.object({}).passthrough();
 const userIDSchema = z.string().trim().min(1).max(128);
 const assistantMessageSchema = z.string().trim().min(1).max(2000);
-const reflectionPromptSchema = z.string().trim().min(1).max(4000);
 const syllabusTextSchema = z.string().trim().min(1).max(120000);
 const sourceNameSchema = z.string().trim().min(1).max(256);
 
@@ -18,11 +17,6 @@ export const goalPlanRequestSchema = z.object({
   userID: userIDSchema,
   goal: looseObject,
   timelineWeeks: z.number().int().positive().max(52)
-});
-
-export const vibeFeedbackRequestSchema = z.object({
-  userID: userIDSchema,
-  prompt: reflectionPromptSchema
 });
 
 export const assistantDraftCommitSchema = z.object({
@@ -68,7 +62,6 @@ export const userJobRequestSchema = z.object({
 
 export type AssistantRequest = z.infer<typeof assistantRequestSchema>;
 export type GoalPlanRequest = z.infer<typeof goalPlanRequestSchema>;
-export type VibeFeedbackRequest = z.infer<typeof vibeFeedbackRequestSchema>;
 export type AssistantDraftCommitRequest = z.infer<typeof assistantDraftCommitSchema>;
 export type ImportTextRequest = z.infer<typeof importTextRequestSchema>;
 export type ImportFileRequest = z.infer<typeof importFileRequestSchema>;

@@ -17,15 +17,6 @@ struct GoalPlanRequestPayload: Codable, Sendable {
     var timelineWeeks: Int
 }
 
-struct VibeFeedbackRequestPayload: Codable, Sendable {
-    var userID: String
-    var prompt: String
-}
-
-struct VibeFeedbackResponsePayload: Codable, Sendable {
-    var feedback: String
-}
-
 struct AssistantDraftCommitPayload: Codable, Sendable {
     var userID: String
     var action: AssistantDraftAction

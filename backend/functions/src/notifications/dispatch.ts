@@ -3,14 +3,6 @@ import { logger } from "firebase-functions";
 
 import { userDoc } from "../shared/firestore.js";
 
-export async function queueNotificationAudit(userID: string, category: string) {
-  return sendPushNotificationToUser(userID, {
-    title: "AI Efficiency update",
-    body: "There is a new planning update waiting in your workspace.",
-    category
-  });
-}
-
 type PushPayload = {
   title: string;
   body: string;

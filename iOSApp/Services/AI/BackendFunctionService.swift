@@ -33,15 +33,6 @@ final class BackendFunctionService: BackendFunctionServicing {
         )
     }
 
-    func generateVibeFeedback(_ request: VibeFeedbackRequestPayload) async throws -> VibeFeedbackResponsePayload {
-        try await invokeRequired(
-            "generateVibeFeedback",
-            body: request,
-            decode: VibeFeedbackResponsePayload.self,
-            feature: "Vibe feedback"
-        )
-    }
-
     func commitAssistantDraft(_ request: AssistantDraftCommitPayload) async throws {
         _ = try await invokeRequired(
             "commitAssistantDraft",
