@@ -15,3 +15,4 @@ GOOGLE_REVERSED_CLIENT_ID =
 PRIVACY_POLICY_URL =
 TERMS_OF_SERVICE_URL =
 #include? "Secrets.xcconfig"
+#include? "Secrets.debug.xcconfig"
