@@ -527,18 +527,24 @@ final class SyllabusImportService: SyllabusImportServicing {
         _ = try requiredAIBackendService(aiBackendService)
         let data = try Data(contentsOf: fileURL)
         let contentType = fileURL.pathExtension.lowercased() == "pdf" ? "application/pdf" : "text/plain"
-        let remotePath = try await requiredStorageService(storageService).upload(
+        let storageService = try requiredStorageService(storageService)
+        let remotePath = try await storageService.upload(
             data: data,
             path: "users/\(userID)/imports/\(UUID().uuidString)-\(fileURL.lastPathComponent)",
             contentType: contentType
         )
 
-        return try await importWithAI(
-            extractedText,
-            sourceName: fileURL.lastPathComponent,
-            uploadedFilePath: remotePath,
-            for: userID
-        )
+        do {
+            return try await importWithAI(
+                extractedText,
+                sourceName: fileURL.lastPathComponent,
+                uploadedFilePath: remotePath,
+                for: userID
+            )
+        } catch {
+            try? await storageService.delete(path: remotePath)
+            throw error
+        }
     }
 
     func commit(_ job: ImportJob, for userID: String) async throws {
