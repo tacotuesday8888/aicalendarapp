@@ -9,7 +9,7 @@ import {
   type GoalPlanRequest
 } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
-import { serverTimestamp, userScopedCollection } from "../shared/firestore.js";
+import { normalizeFirestoreValue, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
 import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 import { logLegacyAIEndpointUse } from "../shared/legacyInstrumentation.js";
@@ -19,6 +19,7 @@ import {
   buildAssistantUserPrompt,
   buildGoalPlanPrompt
 } from "./prompts.js";
+import { runAIWorkflow } from "./router.js";
 import { crisisSafetyFeedback } from "./safety.js";
 import { authorizeAndReserveAIUsage, logAIUsage } from "./usage.js";
 
@@ -46,8 +47,42 @@ export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchem
   const userID = requireMatchingUser(authUID, data.userID);
   await authorizeAndReserveAIUsage(userID, "assistant_chat");
 
-  const thread = await createAssistantThread(userID, data);
+  const response = await runAIWorkflow(userID, {
+    workflow: "assistant_chat",
+    payload: {
+      message: data.message,
+      timezone: legacyTimezone(),
+      currentScreen: "legacy_assistant_endpoint",
+      date: stringValue(recordValue(data.snapshot).date) ?? null,
+      contextHints: {
+        legacyEndpoint: true,
+        nextSuggestedAction: stringValue(recordValue(data.snapshot).nextSuggestedAction) ?? null,
+        goalCount: data.goals.length
+      }
+    }
+  });
   await logAIUsage(userID, "assistant_chat", "success");
+
+  const threadSnapshot = await userScopedCollection(userID, "assistantThreads").doc("primary").get();
+  const thread = normalizeFirestoreValue(threadSnapshot.data() ?? {
+    id: "primary",
+    messages: [
+      {
+        id: `primary-user-${Date.now()}`,
+        role: "user",
+        content: data.message,
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: `primary-assistant-${Date.now()}`,
+        role: "assistant",
+        content: stringValue(recordValue(response.result).message) ?? "AI response completed.",
+        createdAt: new Date().toISOString()
+      }
+    ],
+    pendingDrafts: []
+  });
+
   return { thread };
 }, aiFunctionOptions);
 
@@ -56,9 +91,42 @@ export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema
   const userID = requireMatchingUser(authUID, data.userID);
   await authorizeAndReserveAIUsage(userID, "goal_plan_generation");
 
-  const draft = await createGoalPlanDraft(userID, data);
+  const goal = recordValue(data.goal);
+  const response = await runAIWorkflow(userID, {
+    workflow: "goal_plan_generation",
+    payload: {
+      goalID: stringValue(goal.id),
+      goal: {
+        title: stringValue(goal.title) ?? "Untitled goal",
+        description: stringValue(goal.detail) ?? stringValue(goal.description) ?? ""
+      },
+      timelineWeeks: data.timelineWeeks,
+      startDate: new Date().toISOString(),
+      timezone: legacyTimezone()
+    }
+  });
   await logAIUsage(userID, "goal_plan_generation", "success");
-  return draft;
+
+  const result = recordValue(response.result);
+  const milestones = Array.isArray(result.milestones) ? result.milestones.map(recordValue) : [];
+  const nextActions = Array.isArray(result.nextActions) ? result.nextActions.map(recordValue) : [];
+  return {
+    id: response.draftID ?? userScopedCollection(userID, "goalPlans").doc().id,
+    goalID: stringValue(goal.id) ?? "",
+    summary: stringValue(result.summary) ?? "Review this generated plan before adding it to your planner.",
+    suggestedTimelineWeeks: data.timelineWeeks,
+    checkpoints: milestones.map((milestone, index) => ({
+      id: `${response.draftID ?? "legacy-goal-plan"}-checkpoint-${index + 1}`,
+      title: stringValue(milestone.title) ?? `Checkpoint ${index + 1}`,
+      dueDate: stringValue(milestone.dueDate) ?? new Date().toISOString()
+    })),
+    nextActions: nextActions.map((action, index) => ({
+      id: `${response.draftID ?? "legacy-goal-plan"}-step-${index + 1}`,
+      title: stringValue(action.title) ?? `Next action ${index + 1}`,
+      isComplete: false
+    })),
+    createdAt: new Date().toISOString()
+  };
 }, aiFunctionOptions);
 
 export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCommitSchema, async ({ authUID, data }) => {
@@ -67,6 +135,18 @@ export const commitAssistantDraft = onAuthenticatedJsonRequest(assistantDraftCom
   await confirmDraftArtifact(userID, data);
   return { success: true };
 });
+
+function legacyTimezone(): string {
+  return process.env.DEFAULT_TIMEZONE?.trim() || "UTC";
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
 
 async function createAssistantThread(userID: string, request: AssistantRequest) {
   const safetyFeedback = crisisSafetyFeedback(request.message);

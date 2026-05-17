@@ -89,25 +89,14 @@ final class TodayViewModel: ObservableObject {
         defer { isSubmittingVibeCheck = false }
 
         do {
-            let feedback = try await aiBackendService.run(
-                workflow: .vibeFeedback,
-                payload: AIVibeFeedbackPayload(
-                    reflectionText: trimmedPrompt,
-                    timezone: TimeZone.current.identifier,
-                    recentContext: [
-                        "mood": .string(selectedVibeMood.rawValue),
-                        "screen": .string("today")
-                    ]
-                ),
-                decode: AIVibeFeedbackResult.self
-            )
-            let vibe = VibeCheck(mood: selectedVibeMood, prompt: trimmedPrompt, feedback: feedback.result.feedback)
+            let feedback = try await vibeFeedback(for: trimmedPrompt)
+            let vibe = VibeCheck(mood: selectedVibeMood, prompt: trimmedPrompt, feedback: feedback.text)
             try await reflectionService.saveVibeCheck(vibe, for: user.id)
             vibePrompt = ""
             errorMessage = nil
             analyticsService.track(
                 event: "vibe_check_submitted",
-                parameters: ["needs_escalation": feedback.result.needsEscalation]
+                parameters: ["needs_escalation": feedback.needsEscalation, "ai_configured": aiBackendService.isConfigured]
             )
         } catch {
             errorMessage = AppError.wrap(error, fallback: "Unable to save vibe check.").errorDescription
@@ -185,6 +174,29 @@ final class TodayViewModel: ObservableObject {
     var availableCheckInMoment: CheckInMoment? {
         guard let moment = snapshot.nextCheckInMoment else { return nil }
         return hasCheckedIn(for: moment) ? nil : moment
+    }
+
+    private func vibeFeedback(for text: String) async throws -> (text: String, needsEscalation: Bool) {
+        guard aiBackendService.isConfigured else {
+            return (
+                "Saved. AI feedback is unavailable until the live AI backend is configured, but this reflection is still part of your check-in history.",
+                false
+            )
+        }
+
+        let response = try await aiBackendService.run(
+            workflow: .vibeFeedback,
+            payload: AIVibeFeedbackPayload(
+                reflectionText: text,
+                timezone: TimeZone.current.identifier,
+                recentContext: [
+                    "mood": .string(selectedVibeMood.rawValue),
+                    "screen": .string("today")
+                ]
+            ),
+            decode: AIVibeFeedbackResult.self
+        )
+        return (response.result.feedback, response.result.needsEscalation)
     }
 }
 

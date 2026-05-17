@@ -9,10 +9,11 @@ import {
   importTextRequestSchema
 } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
-import { db, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
+import { db, normalizeFirestoreValue, serverTimestamp, userScopedCollection } from "../shared/firestore.js";
 import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 import { logLegacyAIEndpointUse } from "../shared/legacyInstrumentation.js";
+import { runAIWorkflow } from "../ai/router.js";
 import { createAIProvider, isAIDisabledResponse } from "../ai/provider.js";
 import { authorizeAndReserveAIUsage, enforceAIPremiumAccess, logAIUsage } from "../ai/usage.js";
 
@@ -135,33 +136,30 @@ export const deleteImportJob = onAuthenticatedJsonRequest(deleteImportSchema, as
 });
 
 async function createImportJob(userID: string, rawText: string, sourceName: string, uploadedFilePath: string | null = null) {
-  const imports = userScopedCollection(userID, "imports");
-  const importRef = imports.doc();
-  const parsed = await parseSource(rawText);
-
-  const job = {
-    id: importRef.id,
-    sourceName,
-    status: "processing",
-    extractedCourses: parsed.courses,
-    extractedAssignments: parsed.assignments,
-    warnings: parsed.warnings,
-    uploadedFilePath,
-    createdAt: new Date().toISOString(),
-    committedAt: null
-  };
-
-  await importRef.set({
-    ...job,
-    status: "completed",
-    createdAt: serverTimestamp()
+  const response = await runAIWorkflow(userID, {
+    workflow: "syllabus_import",
+    payload: {
+      extractedText: rawText,
+      currentDate: new Date().toISOString(),
+      timezone: process.env.DEFAULT_TIMEZONE?.trim() || "UTC",
+      sourceName,
+      uploadedFilePath
+    }
   });
+
+  if (!response.draftID) {
+    throw new HttpsError("internal", "Syllabus import did not create a review job.");
+  }
+
+  const importSnapshot = await userScopedCollection(userID, "imports").doc(response.draftID).get();
+  const job = normalizeFirestoreValue(importSnapshot.data() ?? null);
+  if (!job || typeof job !== "object" || Array.isArray(job)) {
+    throw new HttpsError("internal", "Syllabus import review job could not be loaded.");
+  }
+
   await logAIUsage(userID, "syllabus_import", "success", { sourceName });
 
-  return {
-    ...job,
-    status: "completed"
-  };
+  return job;
 }
 
 async function createFailedImportJob(userID: string, sourceName: string, uploadedFilePath: string | null, warning: string) {

@@ -11,6 +11,10 @@ final class AIBackendService: AIBackendServicing {
         self.configuration = configuration
     }
 
+    var isConfigured: Bool {
+        networkService != nil && configuration.aiAPIBaseURL != nil
+    }
+
     func run<Payload: Encodable, Result: Decodable>(
         workflow: AIWorkflow,
         payload: Payload,

@@ -90,7 +90,7 @@ export const ai = onRequest(aiFunctionOptions, async (request: Request, response
   }
 });
 
-async function runAIWorkflow(userID: string, request: AIRunRequest): Promise<AIRunSuccess> {
+export async function runAIWorkflow(userID: string, request: AIRunRequest): Promise<AIRunSuccess> {
   switch (request.workflow) {
     case "assistant_chat": {
       const context = await loadAssistantWorkflowContext(userID, request.payload);

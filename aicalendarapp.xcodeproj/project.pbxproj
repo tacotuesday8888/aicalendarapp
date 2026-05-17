@@ -42,6 +42,7 @@
 				Resources/Config/Debug.xcconfig,
 				Resources/Config/GoogleService-Info.plist.template,
 				Resources/Config/Release.xcconfig,
+				Resources/Config/Secrets.debug.xcconfig,
 				Resources/Config/Secrets.template.xcconfig,
 				Resources/Config/Secrets.xcconfig,
 			);

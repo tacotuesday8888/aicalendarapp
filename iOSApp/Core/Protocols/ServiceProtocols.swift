@@ -73,6 +73,8 @@ protocol BackendFunctionServicing: AnyObject {
 }
 
 protocol AIBackendServicing: AnyObject {
+    var isConfigured: Bool { get }
+
     func run<Payload: Encodable, Result: Decodable>(
         workflow: AIWorkflow,
         payload: Payload,
