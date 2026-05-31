@@ -61,6 +61,8 @@
 	<true/>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Sync classes, deadlines, and study blocks with Apple Calendar.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Import calendar events into your planner so your classes, deadlines, and study blocks stay organized.</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>Receive reminders for deadlines, study sessions, habits, and daily check-ins.</string>
 	<key>RevenueCatAPIKey</key>
