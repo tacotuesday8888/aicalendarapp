@@ -105,33 +105,45 @@ final class ReflectionsViewModel: ObservableObject {
         defer { isSavingVibeCheck = false }
 
         do {
-            let response = try await aiBackendService.run(
-                workflow: .vibeFeedback,
-                payload: AIVibeFeedbackPayload(
-                    reflectionText: trimmedPrompt,
-                    timezone: TimeZone.current.identifier,
-                    recentContext: [
-                        "mood": .string(selectedMood.rawValue),
-                        "screen": .string("reflections")
-                    ]
-                ),
-                decode: AIVibeFeedbackResult.self
-            )
+            let feedback = try await vibeFeedback(for: trimmedPrompt)
             let vibeCheck = VibeCheck(
                 mood: selectedMood,
                 prompt: trimmedPrompt,
-                feedback: response.result.feedback
+                feedback: feedback.text
             )
             try await reflectionService.saveVibeCheck(vibeCheck, for: user.id)
             vibePrompt = ""
             errorMessage = nil
             analyticsService.track(
                 event: "vibe_check_saved",
-                parameters: ["needs_escalation": response.result.needsEscalation]
+                parameters: ["needs_escalation": feedback.needsEscalation, "ai_configured": aiBackendService.isConfigured]
             )
         } catch {
             errorMessage = AppError.wrap(error, fallback: "Unable to save vibe check.").errorDescription
         }
+    }
+
+    private func vibeFeedback(for text: String) async throws -> (text: String, needsEscalation: Bool) {
+        guard aiBackendService.isConfigured else {
+            return (
+                "Saved. AI feedback is unavailable until the live AI backend is configured, but this reflection is still part of your check-in history.",
+                false
+            )
+        }
+
+        let response = try await aiBackendService.run(
+            workflow: .vibeFeedback,
+            payload: AIVibeFeedbackPayload(
+                reflectionText: text,
+                timezone: TimeZone.current.identifier,
+                recentContext: [
+                    "mood": .string(selectedMood.rawValue),
+                    "screen": .string("reflections")
+                ]
+            ),
+            decode: AIVibeFeedbackResult.self
+        )
+        return (response.result.feedback, response.result.needsEscalation)
     }
 
     func deleteCheckIns(at offsets: IndexSet) {

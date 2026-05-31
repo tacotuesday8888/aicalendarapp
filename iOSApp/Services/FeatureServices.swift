@@ -20,8 +20,8 @@ private func requiredBackendFunctionService(_ backendFunctionService: BackendFun
 }
 
 private func requiredAIBackendService(_ aiBackendService: AIBackendServicing?) throws -> AIBackendServicing {
-    guard let aiBackendService else {
-        throw AppError.missingConfiguration("aiBackendService")
+    guard let aiBackendService, aiBackendService.isConfigured else {
+        throw AppError.unknown("This feature requires the live backend AI router. Configure Firebase, AIAPIBaseURL, and sign in again.")
     }
     return aiBackendService
 }
@@ -67,38 +67,32 @@ final class GoalService: GoalServicing {
     }
 
     func generatePlan(for goal: Goal, timelineWeeks: Int, userID: String) async throws -> GoalPlanDraft {
-        if let aiBackendService {
-            let response = try await aiBackendService.run(
-                workflow: .goalPlanGeneration,
-                payload: AIGoalPlanPayload(
-                    goalID: goal.id,
-                    goal: AIGoalDetails(goal: goal),
-                    timelineWeeks: timelineWeeks,
-                    startDate: ISO8601DateFormatter.appJSON.string(from: .now),
-                    timezone: TimeZone.current.identifier
-                ),
-                decode: AIGoalPlanResult.self
-            )
-
-            return GoalPlanDraft(
-                id: response.draftID ?? UUID().uuidString,
+        let response = try await requiredAIBackendService(aiBackendService).run(
+            workflow: .goalPlanGeneration,
+            payload: AIGoalPlanPayload(
                 goalID: goal.id,
-                summary: response.result.summary,
-                suggestedTimelineWeeks: timelineWeeks,
-                checkpoints: response.result.milestones.map { milestone in
-                    GoalCheckpoint(
-                        title: milestone.title,
-                        dueDate: Self.parseISODate(milestone.dueDate) ?? .now
-                    )
-                },
-                nextActions: response.result.nextActions.map { action in
-                    GoalStep(title: action.title, isComplete: false)
-                }
-            )
-        }
+                goal: AIGoalDetails(goal: goal),
+                timelineWeeks: timelineWeeks,
+                startDate: ISO8601DateFormatter.appJSON.string(from: .now),
+                timezone: TimeZone.current.identifier
+            ),
+            decode: AIGoalPlanResult.self
+        )
 
-        return try await requiredBackendFunctionService(backendFunctionService).generateGoalPlan(
-            GoalPlanRequestPayload(userID: userID, goal: goal, timelineWeeks: timelineWeeks)
+        return GoalPlanDraft(
+            id: response.draftID ?? UUID().uuidString,
+            goalID: goal.id,
+            summary: response.result.summary,
+            suggestedTimelineWeeks: timelineWeeks,
+            checkpoints: response.result.milestones.map { milestone in
+                GoalCheckpoint(
+                    title: milestone.title,
+                    dueDate: Self.parseISODate(milestone.dueDate) ?? .now
+                )
+            },
+            nextActions: response.result.nextActions.map { action in
+                GoalStep(title: action.title, isComplete: false)
+            }
         )
     }
 
@@ -424,39 +418,33 @@ final class AssistantService: AssistantServicing {
     }
 
     func sendMessage(_ text: String, for userID: String, snapshot: PlannerSnapshot, goals: [Goal]) async throws -> AssistantThread {
-        if let aiBackendService {
-            let response = try await aiBackendService.run(
-                workflow: .assistantChat,
-                payload: AIAssistantChatPayload(
-                    message: text,
-                    timezone: TimeZone.current.identifier,
-                    currentScreen: "assistant",
-                    date: ISO8601DateFormatter.appJSON.string(from: snapshot.date),
-                    contextHints: [
-                        "nextSuggestedAction": .string(snapshot.nextSuggestedAction),
-                        "goalCount": .number(Double(goals.count)),
-                        "assignmentCount": .number(Double(snapshot.assignments.count))
-                    ]
-                ),
-                decode: AIAssistantChatResult.self
-            )
+        let response = try await requiredAIBackendService(aiBackendService).run(
+            workflow: .assistantChat,
+            payload: AIAssistantChatPayload(
+                message: text,
+                timezone: TimeZone.current.identifier,
+                currentScreen: "assistant",
+                date: ISO8601DateFormatter.appJSON.string(from: snapshot.date),
+                contextHints: [
+                    "nextSuggestedAction": .string(snapshot.nextSuggestedAction),
+                    "goalCount": .number(Double(goals.count)),
+                    "assignmentCount": .number(Double(snapshot.assignments.count))
+                ]
+            ),
+            decode: AIAssistantChatResult.self
+        )
 
-            if let databaseService,
-               let thread = try? await databaseService.fetch(
-                    AssistantThread.self,
-                    from: .assistantThreads,
-                    id: "primary",
-                    userID: userID
-               ) {
-                return thread
-            }
-
-            return Self.localAssistantThread(userMessage: text, response: response)
+        if let databaseService,
+           let thread = try? await databaseService.fetch(
+                AssistantThread.self,
+                from: .assistantThreads,
+                id: "primary",
+                userID: userID
+           ) {
+            return thread
         }
 
-        return try await requiredBackendFunctionService(backendFunctionService).assistantRespond(
-            AssistantRequestPayload(userID: userID, message: text, snapshot: snapshot, goals: goals)
-        )
+        return Self.localAssistantThread(userMessage: text, response: response)
     }
 
     func commitDraftAction(_ action: AssistantDraftAction, for userID: String) async throws {
@@ -523,13 +511,8 @@ final class SyllabusImportService: SyllabusImportServicing {
     }
 
     func importText(_ text: String, for userID: String) async throws -> ImportJob {
-        if aiBackendService != nil {
-            return try await importWithAI(text, sourceName: "text-import", uploadedFilePath: nil, for: userID)
-        }
-
-        return try await requiredBackendFunctionService(backendFunctionService).importSyllabusText(
-            ImportTextRequestPayload(userID: userID, text: text)
-        )
+        _ = try requiredAIBackendService(aiBackendService)
+        return try await importWithAI(text, sourceName: "text-import", uploadedFilePath: nil, for: userID)
     }
 
     func importFile(at fileURL: URL, for userID: String) async throws -> ImportJob {
@@ -541,26 +524,27 @@ final class SyllabusImportService: SyllabusImportServicing {
         }
 
         let extractedText = try extractImportText(from: fileURL)
+        _ = try requiredAIBackendService(aiBackendService)
         let data = try Data(contentsOf: fileURL)
         let contentType = fileURL.pathExtension.lowercased() == "pdf" ? "application/pdf" : "text/plain"
-        let remotePath = try await requiredStorageService(storageService).upload(
+        let storageService = try requiredStorageService(storageService)
+        let remotePath = try await storageService.upload(
             data: data,
             path: "users/\(userID)/imports/\(UUID().uuidString)-\(fileURL.lastPathComponent)",
             contentType: contentType
         )
 
-        if aiBackendService != nil {
+        do {
             return try await importWithAI(
                 extractedText,
                 sourceName: fileURL.lastPathComponent,
                 uploadedFilePath: remotePath,
                 for: userID
             )
+        } catch {
+            try? await storageService.delete(path: remotePath)
+            throw error
         }
-
-        return try await requiredBackendFunctionService(backendFunctionService).importSyllabusFile(
-            ImportFileRequestPayload(userID: userID, sourceName: fileURL.lastPathComponent, uploadedPath: remotePath, extractedText: extractedText)
-        )
     }
 
     func commit(_ job: ImportJob, for userID: String) async throws {

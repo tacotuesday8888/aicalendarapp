@@ -196,14 +196,17 @@ private final class TestGoalService: GoalServicing {
 
 private final class TestAuthService: AuthServicing {
     var currentUserID: String?
+    var profile: UserProfile?
     private(set) var didSignOut = false
 
-    init(currentUserID: String? = nil) {
+    init(currentUserID: String? = nil, profile: UserProfile? = nil) {
         self.currentUserID = currentUserID
+        self.profile = profile
     }
 
     func authStateStream() -> AsyncStream<UserProfile?> {
         AsyncStream { continuation in
+            continuation.yield(profile)
             continuation.finish()
         }
     }
@@ -232,6 +235,7 @@ private final class TestAuthService: AuthServicing {
 
 private final class TestUserService: UserServicing {
     var profile: UserProfile
+    var onboardingState = OnboardingState()
     private(set) var savedProfiles = [UserProfile]()
 
     init(profile: UserProfile) {
@@ -248,7 +252,7 @@ private final class TestUserService: UserServicing {
     }
 
     func fetchOnboardingState(for userID: String) async throws -> OnboardingState {
-        OnboardingState()
+        onboardingState
     }
 
     func saveOnboardingState(_ state: OnboardingState, for userID: String) async throws {}
@@ -295,6 +299,7 @@ private final class TestNotificationService: NotificationServicing {
 private final class TestSubscriptionService: SubscriptionServicing {
     var state = SubscriptionState.locked
     private(set) var restoredUserIDs = [String]()
+    private(set) var refreshedUserIDs = [String]()
     private(set) var linkedUserIDs = [String]()
     private(set) var didUnlinkUser = false
 
@@ -310,7 +315,8 @@ private final class TestSubscriptionService: SubscriptionServicing {
     }
 
     func refreshStatus(for userID: String) async throws -> SubscriptionState {
-        state
+        refreshedUserIDs.append(userID)
+        return state
     }
 
     func purchase(plan: SubscriptionPlan, for userID: String) async throws -> SubscriptionState {
@@ -414,6 +420,36 @@ struct IOSAppTests {
             assistantOptIn: true,
             selectedCalendarIDs: [],
             createdAt: Date(timeIntervalSince1970: 1_776_000_000)
+        )
+    }
+
+    private func sessionContainer(
+        authService: AuthServicing,
+        userService: UserServicing,
+        subscriptionService: SubscriptionServicing,
+        analyticsService: AnalyticsServicing = TestAnalyticsService()
+    ) -> AppContainer {
+        AppContainer(
+            configuration: .shared,
+            analyticsService: analyticsService,
+            authService: authService,
+            userService: userService,
+            goalService: TestGoalService(),
+            plannerService: TestPlannerService(),
+            calendarSyncService: TestCalendarSyncService(),
+            studySessionService: StudySessionService.shared,
+            reflectionService: ReflectionService.shared,
+            assistantService: AssistantService.shared,
+            backendFunctionService: TestBackendFunctionService(),
+            aiBackendService: AIBackendService(configuration: .shared),
+            syllabusImportService: SyllabusImportService.shared,
+            notificationService: TestNotificationService(),
+            subscriptionService: subscriptionService,
+            paywallService: TestPaywallService(),
+            databaseService: TestDatabaseService(),
+            storageService: StorageService.shared,
+            networkService: NetworkService.shared,
+            deepLinkService: DeepLinkService.shared
         )
     }
 
@@ -705,6 +741,33 @@ struct IOSAppTests {
         #expect(observedState?.entitlement == .active)
         #expect(observedState?.activePlan == .annual)
         #expect(observedState?.trialEligible == false)
+    }
+
+    @Test func appSessionRefreshesSubscriptionAfterExistingUserContextLoads() async throws {
+        let profile = testProfile(id: uniqueUserID("session-subscription"))
+        var onboarding = OnboardingState()
+        onboarding.didCompleteProfile = true
+        onboarding.completedAt = Date(timeIntervalSince1970: 1_777_000_000)
+
+        let userService = TestUserService(profile: profile)
+        userService.onboardingState = onboarding
+        let subscriptionService = TestSubscriptionService()
+        subscriptionService.state = SubscriptionState.unlocked
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: subscriptionService
+        )
+
+        let viewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where subscriptionService.refreshedUserIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(subscriptionService.linkedUserIDs == [profile.id])
+        #expect(subscriptionService.refreshedUserIDs == [profile.id])
+        #expect(viewModel.onboardingState.isComplete)
+        #expect(viewModel.subscriptionState.entitlement == .active)
     }
 
     @Test func settingsViewModelPreparesExportDocumentFromBackendPayload() async throws {
