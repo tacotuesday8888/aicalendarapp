@@ -112,6 +112,7 @@ final class AppSessionViewModel: ObservableObject {
 
         do {
             onboardingState = try await container.userService.fetchOnboardingState(for: profile.id)
+            await refreshSubscription()
         } catch {
             onboardingState = OnboardingState()
             subscriptionState = .locked
