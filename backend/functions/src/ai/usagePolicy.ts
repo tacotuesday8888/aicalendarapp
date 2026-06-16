@@ -7,6 +7,31 @@ export type SubscriptionEntitlement = "active" | "inactive";
 export const DEFAULT_FREE_DAILY_LIMIT = 50;
 export const DEFAULT_PREMIUM_DAILY_LIMIT = 200;
 
+export function entitlementWithBetaProAccess(
+  userID: string,
+  subscriptionEntitlement: SubscriptionEntitlement,
+  env: NodeJS.ProcessEnv = process.env
+): SubscriptionEntitlement {
+  if (subscriptionEntitlement === "active" || isBetaProUserID(userID, env)) {
+    return "active";
+  }
+
+  return "inactive";
+}
+
+export function isBetaProUserID(userID: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const rawValue = env.BETA_PRO_USER_IDS;
+  if (!rawValue) {
+    return false;
+  }
+
+  return rawValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .some((listedUserID) => listedUserID === userID);
+}
+
 export function dailyLimitForWorkflow(
   workflow: AIWorkflow,
   entitlement: SubscriptionEntitlement,

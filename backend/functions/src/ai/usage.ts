@@ -5,6 +5,7 @@ import { getAIModelName, getAIProviderMode } from "./config.js";
 import type { AIWorkflow } from "./schemas.js";
 import {
   dailyLimitForWorkflow,
+  entitlementWithBetaProAccess,
   nextWorkflowCountsForReservation,
   numberValue,
   type SubscriptionEntitlement,
@@ -78,7 +79,8 @@ async function reserveAIRateLimit(userID: string, workflow: AIWorkflow, maxPerDa
 
 async function currentSubscriptionEntitlement(userID: string): Promise<SubscriptionEntitlement> {
   const snapshot = await userDoc(userID).collection("subscriptions").doc("current").get();
-  return snapshot.get("entitlement") === "active" ? "active" : "inactive";
+  const subscriptionEntitlement = snapshot.get("entitlement") === "active" ? "active" : "inactive";
+  return entitlementWithBetaProAccess(userID, subscriptionEntitlement);
 }
 
 function enforceAIPremiumAccessForEntitlement(entitlement: SubscriptionEntitlement, workflow: AIWorkflow) {

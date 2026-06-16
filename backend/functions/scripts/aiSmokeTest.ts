@@ -25,6 +25,8 @@ import {
   DEFAULT_FREE_DAILY_LIMIT,
   DEFAULT_PREMIUM_DAILY_LIMIT,
   dailyLimitForWorkflow,
+  entitlementWithBetaProAccess,
+  isBetaProUserID,
   nextWorkflowCountsForReservation
 } from "../src/ai/usagePolicy.js";
 import { needsCrisisSafetyResponse, reviewVibeFeedbackForCrisis } from "../src/ai/safety.js";
@@ -167,6 +169,14 @@ async function runSmokeTest() {
 }
 
 function assertUsagePolicy() {
+  assert.equal(isBetaProUserID("uid-a", { BETA_PRO_USER_IDS: "uid-a,uid-b" }), true);
+  assert.equal(isBetaProUserID("uid-b", { BETA_PRO_USER_IDS: " uid-a , uid-b " }), true);
+  assert.equal(isBetaProUserID("uid", { BETA_PRO_USER_IDS: "uid-extra" }), false);
+  assert.equal(isBetaProUserID("UID-A", { BETA_PRO_USER_IDS: "uid-a" }), false);
+  assert.equal(entitlementWithBetaProAccess("uid-a", "inactive", { BETA_PRO_USER_IDS: "uid-a" }), "active");
+  assert.equal(entitlementWithBetaProAccess("uid-c", "inactive", { BETA_PRO_USER_IDS: "uid-a" }), "inactive");
+  assert.equal(entitlementWithBetaProAccess("uid-a", "active", { BETA_PRO_USER_IDS: "" }), "active");
+
   assert.equal(dailyLimitForWorkflow("vibe_feedback", "inactive", {}), DEFAULT_FREE_DAILY_LIMIT);
   assert.equal(dailyLimitForWorkflow("assistant_chat", "active", {}), DEFAULT_PREMIUM_DAILY_LIMIT);
   assert.equal(

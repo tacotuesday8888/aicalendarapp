@@ -62,7 +62,9 @@ final class GoalsViewModel: ObservableObject {
                             index[plan.goalID] = plan
                         }
                     }
-                    self.plansByGoalID = index
+                    self.plansByGoalID.merge(index) { existing, observed in
+                        observed.createdAt > existing.createdAt ? observed : existing
+                    }
                 }
             } catch {
                 self.errorMessage = AppError.wrap(error, fallback: "Unable to load goal plans.").errorDescription
@@ -195,7 +197,8 @@ final class GoalsViewModel: ObservableObject {
         defer { planLoadingGoalIDs.remove(goal.id) }
 
         do {
-            _ = try await goalService.generatePlan(for: goal, timelineWeeks: 6, userID: user.id)
+            let plan = try await goalService.generatePlan(for: goal, timelineWeeks: 6, userID: user.id)
+            plansByGoalID[plan.goalID] = plan
             errorMessage = nil
             analyticsService.track(event: "goal_plan_requested", parameters: ["goal_id": goal.id])
         } catch {

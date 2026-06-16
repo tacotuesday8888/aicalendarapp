@@ -697,6 +697,52 @@ struct IOSAppTests {
         #expect(analyticsService.events.contains("goal_deleted"))
     }
 
+    @Test func goalsViewModelShowsGeneratedPlanImmediatelyWithoutClientWrite() async throws {
+        let profile = testProfile(id: uniqueUserID("goals-plan-vm"))
+        let goalService = TestGoalService()
+        let database = TestDatabaseService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: database,
+            analyticsService: analyticsService
+        )
+        let goal = Goal(
+            title: "Raise chemistry grade",
+            detail: "Reach an A by finals week.",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: Date(timeIntervalSince1970: 1_779_724_800),
+            sortIndex: 0,
+            subGoals: [],
+            checkpoints: []
+        )
+        goalService.generatedPlan = GoalPlanDraft(
+            goalID: goal.id,
+            summary: "Draft plan",
+            suggestedTimelineWeeks: 6,
+            checkpoints: [],
+            nextActions: [
+                GoalStep(title: "Review chapter notes", isComplete: false),
+                GoalStep(title: "Practice exam questions", isComplete: false)
+            ]
+        )
+
+        await viewModel.generatePlan(for: goal)
+
+        let visiblePlan = try #require(viewModel.plansByGoalID[goal.id])
+        #expect(visiblePlan.summary == "Draft plan")
+        #expect(visiblePlan.nextActions.map(\.title) == ["Review chapter notes", "Practice exam questions"])
+        #expect(viewModel.planLoadingGoalIDs.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.events.contains("goal_plan_requested"))
+
+        let savedDrafts = try await database.fetchAll(GoalPlanDraft.self, from: .goalPlans, userID: profile.id)
+        #expect(savedDrafts.isEmpty)
+    }
+
     @Test func habitsCanBeCreatedPersistedAndUpdatedOutsideCheckInFlow() async throws {
         let userID = uniqueUserID("habits")
         let database = TestDatabaseService()
