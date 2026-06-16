@@ -2,7 +2,7 @@
 
 ## Local setup
 
-1. Install Node.js 20 and use `npx -y firebase-tools@latest` for Firebase CLI commands.
+1. Install Node.js 22 and use `npx -y firebase-tools@latest` for Firebase CLI commands.
 2. Copy `.firebaserc.template` to `.firebaserc` and set your Firebase project IDs.
 3. Install dependencies in `backend/functions`.
 4. Copy `iOSApp/Resources/Config/Secrets.template.xcconfig` to `iOSApp/Resources/Config/Secrets.xcconfig` for local overrides and fill in:
@@ -32,8 +32,9 @@
    - `APP_CHECK_MODE=monitor` for first rollout.
    - Change to `APP_CHECK_MODE=enforce` only after verified App Check traffic appears in Firebase metrics and the debug simulator token has been registered.
    - Optional quota overrides: `AI_FREE_DAILY_LIMIT`, `AI_PREMIUM_DAILY_LIMIT`, and workflow-specific keys from `backend/config/.env.example`.
-11. AI v1 runs through `backend/functions/src/ai/router.ts` with Genkit + Vertex AI Gemini. Use `AI_PROVIDER=stub` only for local smoke tests. Production and TestFlight functions should use `AI_PROVIDER=vertex` and `AI_ENABLE_STUB_FALLBACK=false`.
-12. Deploy Firestore and Storage rules before enabling live client traffic.
+11. Optional pre-App Store beta access: set `BETA_PRO_USER_IDS` to a comma-separated list of Firebase Auth UIDs that should pass backend AI premium gates while RevenueCat/App Store products are not live yet. Use exact UIDs only, do not commit real values, and remove the override once production subscriptions are verified. This does not update RevenueCat state or change client-side paywall UI.
+12. AI v1 runs through `backend/functions/src/ai/router.ts` with Genkit + Vertex AI Gemini. Use `AI_PROVIDER=stub` only for local smoke tests. Production and TestFlight functions should use `AI_PROVIDER=vertex` and `AI_ENABLE_STUB_FALLBACK=false`.
+13. Deploy Firestore and Storage rules before enabling live client traffic.
 
 ## Required backend configuration
 
@@ -46,6 +47,10 @@
 - `AI_MODEL=gemini-2.5-flash-lite`
 - `AI_VERTEX_LOCATION=us-central1`
 - `AI_ENABLE_STUB_FALLBACK=false`
+
+Optional temporary beta configuration:
+
+- `BETA_PRO_USER_IDS` for named demo/beta accounts only, until RevenueCat/App Store subscriptions are live
 
 ## App Check rollout
 
