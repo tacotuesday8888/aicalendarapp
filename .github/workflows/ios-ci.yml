@@ -40,9 +40,6 @@ jobs:
       SCHEME: aicalendarapp
       CONFIGURATION: Debug
       ONLY_TESTING: aicalendarappTests
-      DERIVED_DATA_PATH: ${{ runner.temp }}/DerivedData
-      SOURCE_PACKAGES_PATH: ${{ runner.temp }}/SourcePackages
-      RESULT_BUNDLE_PATH: ${{ runner.temp }}/aicalendarapp.xcresult
 
     steps:
       - name: Check out repository
