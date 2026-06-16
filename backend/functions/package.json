@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "genkit:ui": "genkit start -- npx tsx --watch src/index.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "serve": "npx -y firebase-tools@latest emulators:start --only functions",
     "deploy": "npx -y firebase-tools@latest deploy --only functions"
   },

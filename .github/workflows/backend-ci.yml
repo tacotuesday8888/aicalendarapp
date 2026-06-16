@@ -1,0 +1,89 @@
+name: Backend CI
+
+"on":
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "backend/functions/**"
+      - "backend/firestore/**"
+      - "backend/storage/**"
+      - "backend/config/.env.example"
+      - "firebase.json"
+      - ".firebaserc.template"
+      - "scripts/bootstrap_backend.sh"
+      - ".github/workflows/backend-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/functions/**"
+      - "backend/firestore/**"
+      - "backend/storage/**"
+      - "backend/config/.env.example"
+      - "firebase.json"
+      - ".firebaserc.template"
+      - "scripts/bootstrap_backend.sh"
+      - ".github/workflows/backend-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  functions:
+    name: Firebase Functions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      AI_PROVIDER: stub
+      APP_CHECK_MODE: monitor
+
+    defaults:
+      run:
+        working-directory: backend/functions
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/functions/package-lock.json
+
+      - name: Set up Java for Firebase emulators
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check backend
+        run: npm run lint
+
+      - name: Type-check backend smoke scripts
+        run: npm run typecheck:scripts
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Run AI smoke tests
+        run: npm run ai:smoke
+
+      - name: Dry-run live smoke request contract
+        run: npm run functions:live-smoke
+        env:
+          LIVE_SMOKE_DRY_RUN: "true"
+          FUNCTIONS_BASE_URL: "https://example.invalid/functions"
+
+      - name: Validate Firebase rules parse in emulators
+        working-directory: ${{ github.workspace }}
+        run: npx -y firebase-tools@latest emulators:exec --project demo-aicalendarapp --only firestore,storage "node -e \"console.log('Firebase rules parsed')\""
