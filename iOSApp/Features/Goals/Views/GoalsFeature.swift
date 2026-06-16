@@ -205,6 +205,104 @@ final class GoalsViewModel: ObservableObject {
             errorMessage = AppError.wrap(error, fallback: "Unable to generate plan.").errorDescription
         }
     }
+
+    func applyPlan(_ plan: GoalPlanDraft, to goal: Goal) async {
+        guard goalActionID == nil else { return }
+        guard plan.goalID == goal.id else {
+            errorMessage = AppError.unknown("This AI plan no longer matches the selected goal. Generate a new plan and try again.").errorDescription
+            return
+        }
+        guard hasApplicablePlanItems(plan) else {
+            errorMessage = AppError.unknown("This AI plan does not include any steps or checkpoints to apply.").errorDescription
+            return
+        }
+
+        errorMessage = nil
+        goalActionID = goal.id
+        defer { goalActionID = nil }
+
+        let currentGoal = goals.first(where: { $0.id == goal.id }) ?? goal
+        var updated = currentGoal
+        updated.subGoals = Self.mergingSteps(existing: currentGoal.subGoals, additions: plan.nextActions)
+        updated.checkpoints = Self.mergingCheckpoints(existing: currentGoal.checkpoints, additions: plan.checkpoints)
+        guard updated != currentGoal else { return }
+
+        do {
+            try await goalService.updateGoal(updated, for: user.id)
+            replaceLocalGoal(updated)
+            errorMessage = nil
+            analyticsService.track(event: "goal_plan_applied", parameters: [
+                "goal_id": goal.id,
+                "next_actions": plan.nextActions.count,
+                "checkpoints": plan.checkpoints.count
+            ])
+        } catch {
+            errorMessage = AppError.wrap(error, fallback: "Unable to apply plan.").errorDescription
+        }
+    }
+
+    func isPlanApplied(_ plan: GoalPlanDraft, to goal: Goal) -> Bool {
+        guard hasApplicablePlanItems(plan) else { return false }
+
+        let appliedStepKeys = Set(goal.subGoals.map { Self.normalizedTitle($0.title) })
+        let appliedCheckpointKeys = Set(goal.checkpoints.map(Self.checkpointKey))
+
+        let stepsApplied = plan.nextActions
+            .map { Self.normalizedTitle($0.title) }
+            .filter { !$0.isEmpty }
+            .allSatisfy { appliedStepKeys.contains($0) }
+        let checkpointsApplied = plan.checkpoints
+            .filter { !Self.normalizedTitle($0.title).isEmpty }
+            .allSatisfy { appliedCheckpointKeys.contains(Self.checkpointKey($0)) }
+
+        return stepsApplied && checkpointsApplied
+    }
+
+    func hasApplicablePlanItems(_ plan: GoalPlanDraft) -> Bool {
+        plan.nextActions.contains { !Self.normalizedTitle($0.title).isEmpty } ||
+            plan.checkpoints.contains { !Self.normalizedTitle($0.title).isEmpty }
+    }
+
+    private func replaceLocalGoal(_ updated: Goal) {
+        guard let index = goals.firstIndex(where: { $0.id == updated.id }) else { return }
+        goals[index] = updated
+    }
+
+    private static func mergingSteps(existing: [GoalStep], additions: [GoalStep]) -> [GoalStep] {
+        var merged = existing
+        var existingKeys = Set(existing.map { normalizedTitle($0.title) })
+
+        for step in additions {
+            let key = normalizedTitle(step.title)
+            guard !key.isEmpty, !existingKeys.contains(key) else { continue }
+            merged.append(step)
+            existingKeys.insert(key)
+        }
+
+        return merged
+    }
+
+    private static func mergingCheckpoints(existing: [GoalCheckpoint], additions: [GoalCheckpoint]) -> [GoalCheckpoint] {
+        var merged = existing
+        var existingKeys = Set(existing.map(checkpointKey))
+
+        for checkpoint in additions {
+            let key = checkpointKey(checkpoint)
+            guard !normalizedTitle(checkpoint.title).isEmpty, !existingKeys.contains(key) else { continue }
+            merged.append(checkpoint)
+            existingKeys.insert(key)
+        }
+
+        return merged
+    }
+
+    private static func normalizedTitle(_ title: String) -> String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func checkpointKey(_ checkpoint: GoalCheckpoint) -> String {
+        "\(normalizedTitle(checkpoint.title))|\(Calendar.current.startOfDay(for: checkpoint.dueDate).timeIntervalSince1970)"
+    }
 }
 
 struct GoalsView: View {
@@ -294,6 +392,9 @@ struct GoalsView: View {
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
+
+                            GoalProgressSummary(goal: goal)
+
                             HStack {
                                 Button("Edit") {
                                     viewModel.beginEditing(goal)
@@ -319,6 +420,8 @@ struct GoalsView: View {
                             }
 
                             if let plan = viewModel.plansByGoalID[goal.id] {
+                                let isPlanApplied = viewModel.isPlanApplied(plan, to: goal)
+                                let canApplyPlan = viewModel.hasApplicablePlanItems(plan)
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(plan.summary)
                                         .font(.subheadline)
@@ -327,6 +430,17 @@ struct GoalsView: View {
                                             .font(.footnote)
                                             .foregroundStyle(.secondary)
                                     }
+                                    Button {
+                                        Task { await viewModel.applyPlan(plan, to: goal) }
+                                    } label: {
+                                        if viewModel.goalActionID == goal.id {
+                                            ProgressView()
+                                        } else {
+                                            Text(isPlanApplied ? "Plan applied" : "Apply plan")
+                                        }
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(viewModel.goalActionID != nil || isPlanApplied || !canApplyPlan)
                                 }
                             }
                         }
@@ -375,6 +489,38 @@ struct GoalsView: View {
             viewModel.start()
         }
         .swGlassListChrome()
+    }
+}
+
+private struct GoalProgressSummary: View {
+    let goal: Goal
+
+    var body: some View {
+        if !goal.subGoals.isEmpty || !goal.checkpoints.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                if !goal.subGoals.isEmpty {
+                    Text("Next steps")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    ForEach(goal.subGoals.prefix(4)) { step in
+                        Text("• \(step.title)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !goal.checkpoints.isEmpty {
+                    Text("Checkpoints")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    ForEach(goal.checkpoints.prefix(4)) { checkpoint in
+                        Text("• \(checkpoint.title) - \(checkpoint.dueDate.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
     }
 }
 

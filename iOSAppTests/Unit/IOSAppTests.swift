@@ -148,6 +148,7 @@ private final class TestGoalService: GoalServicing {
     private(set) var deletedGoalIDs = [String]()
     private(set) var reorderedGoals = [[Goal]]()
     var generatedPlan: GoalPlanDraft?
+    var updateError: Error?
 
     func observeGoals(for userID: String) -> AsyncThrowingStream<[Goal], Error> {
         AsyncThrowingStream { continuation in
@@ -161,6 +162,10 @@ private final class TestGoalService: GoalServicing {
     }
 
     func updateGoal(_ goal: Goal, for userID: String) async throws {
+        if let updateError {
+            throw updateError
+        }
+
         if let index = goals.firstIndex(where: { $0.id == goal.id }) {
             goals[index] = goal
         } else {
@@ -741,6 +746,265 @@ struct IOSAppTests {
 
         let savedDrafts = try await database.fetchAll(GoalPlanDraft.self, from: .goalPlans, userID: profile.id)
         #expect(savedDrafts.isEmpty)
+    }
+
+    @Test func goalsViewModelAppliesGeneratedPlanWithoutDuplicatingExistingProgress() async throws {
+        let profile = testProfile(id: uniqueUserID("goals-plan-apply"))
+        let goalService = TestGoalService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+        let existingCheckpointDate = Date(timeIntervalSince1970: 1_779_724_800)
+        let newCheckpointDate = Date(timeIntervalSince1970: 1_780_329_600)
+        let goal = Goal(
+            title: "Raise chemistry grade",
+            detail: "Reach an A by finals week.",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: Date(timeIntervalSince1970: 1_781_193_600),
+            sortIndex: 0,
+            subGoals: [
+                GoalStep(title: "Review chapter notes", isComplete: true)
+            ],
+            checkpoints: [
+                GoalCheckpoint(title: "Meet advisor", dueDate: existingCheckpointDate)
+            ]
+        )
+        try await goalService.createGoal(goal, for: profile.id)
+        let plan = GoalPlanDraft(
+            goalID: goal.id,
+            summary: "Draft plan",
+            suggestedTimelineWeeks: 6,
+            checkpoints: [
+                GoalCheckpoint(title: "Meet advisor", dueDate: existingCheckpointDate),
+                GoalCheckpoint(title: "Take practice final", dueDate: newCheckpointDate)
+            ],
+            nextActions: [
+                GoalStep(title: "Review chapter notes", isComplete: false),
+                GoalStep(title: "Practice exam questions", isComplete: false)
+            ]
+        )
+
+        viewModel.start()
+        for _ in 0..<10 where viewModel.goals.isEmpty {
+            await Task.yield()
+        }
+        let visibleGoalBeforeApply = try #require(viewModel.goals.first)
+        #expect(visibleGoalBeforeApply.id == goal.id)
+
+        await viewModel.applyPlan(plan, to: goal)
+
+        let updated = try #require(goalService.goals.first)
+        #expect(updated.subGoals.map(\.title) == ["Review chapter notes", "Practice exam questions"])
+        #expect(updated.subGoals.first?.isComplete == true)
+        #expect(updated.checkpoints.map(\.title) == ["Meet advisor", "Take practice final"])
+        #expect(viewModel.isPlanApplied(plan, to: updated))
+        let visibleGoalAfterApply = try #require(viewModel.goals.first)
+        #expect(visibleGoalAfterApply.subGoals.map(\.title) == ["Review chapter notes", "Practice exam questions"])
+        #expect(visibleGoalAfterApply.subGoals.first?.isComplete == true)
+        #expect(visibleGoalAfterApply.checkpoints.map(\.title) == ["Meet advisor", "Take practice final"])
+        #expect(viewModel.isPlanApplied(plan, to: visibleGoalAfterApply))
+        #expect(viewModel.goalActionID == nil)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.events.contains("goal_plan_applied"))
+
+        let applyEventCount = analyticsService.events.filter { $0 == "goal_plan_applied" }.count
+        await viewModel.applyPlan(plan, to: visibleGoalAfterApply)
+        let reapplied = try #require(goalService.goals.first)
+        #expect(reapplied.subGoals.map(\.title) == ["Review chapter notes", "Practice exam questions"])
+        #expect(reapplied.checkpoints.map(\.title) == ["Meet advisor", "Take practice final"])
+        #expect(analyticsService.events.filter { $0 == "goal_plan_applied" }.count == applyEventCount)
+    }
+
+    @Test func goalsViewModelRejectsPlanForDifferentGoalWithoutUpdating() async throws {
+        let profile = testProfile(id: uniqueUserID("goals-plan-mismatch"))
+        let goalService = TestGoalService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+        let goal = Goal(
+            title: "Raise chemistry grade",
+            detail: "Reach an A by finals week.",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: Date(timeIntervalSince1970: 1_781_193_600),
+            sortIndex: 0,
+            subGoals: [],
+            checkpoints: []
+        )
+        try await goalService.createGoal(goal, for: profile.id)
+        let plan = GoalPlanDraft(
+            goalID: "other-goal-id",
+            summary: "Draft plan",
+            suggestedTimelineWeeks: 6,
+            checkpoints: [
+                GoalCheckpoint(title: "Take practice final", dueDate: Date(timeIntervalSince1970: 1_780_329_600))
+            ],
+            nextActions: [
+                GoalStep(title: "Practice exam questions", isComplete: false)
+            ]
+        )
+
+        await viewModel.applyPlan(plan, to: goal)
+
+        let storedGoal = try #require(goalService.goals.first)
+        #expect(storedGoal.subGoals.isEmpty)
+        #expect(storedGoal.checkpoints.isEmpty)
+        #expect(viewModel.goalActionID == nil)
+        #expect(viewModel.errorMessage?.contains("no longer matches") == true)
+        #expect(!analyticsService.events.contains("goal_plan_applied"))
+    }
+
+    @Test func goalsViewModelApplyPlanKeepsGoalUnchangedWhenUpdateFails() async throws {
+        let profile = testProfile(id: uniqueUserID("goals-plan-failure"))
+        let goalService = TestGoalService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+        let goal = Goal(
+            title: "Raise chemistry grade",
+            detail: "Reach an A by finals week.",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: Date(timeIntervalSince1970: 1_781_193_600),
+            sortIndex: 0,
+            subGoals: [],
+            checkpoints: []
+        )
+        try await goalService.createGoal(goal, for: profile.id)
+        goalService.updateError = AppError.network(description: "Apply failed.")
+        let plan = GoalPlanDraft(
+            goalID: goal.id,
+            summary: "Draft plan",
+            suggestedTimelineWeeks: 6,
+            checkpoints: [
+                GoalCheckpoint(title: "Take practice final", dueDate: Date(timeIntervalSince1970: 1_780_329_600))
+            ],
+            nextActions: [
+                GoalStep(title: "Practice exam questions", isComplete: false)
+            ]
+        )
+
+        await viewModel.applyPlan(plan, to: goal)
+
+        let storedGoal = try #require(goalService.goals.first)
+        #expect(storedGoal.subGoals.isEmpty)
+        #expect(storedGoal.checkpoints.isEmpty)
+        #expect(viewModel.goalActionID == nil)
+        #expect(viewModel.errorMessage == "Apply failed.")
+        #expect(!analyticsService.events.contains("goal_plan_applied"))
+    }
+
+    @Test func goalsViewModelRejectsPlanWithoutApplicableItems() async throws {
+        let profile = testProfile(id: uniqueUserID("goals-plan-empty"))
+        let goalService = TestGoalService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+        let goal = Goal(
+            title: "Raise chemistry grade",
+            detail: "Reach an A by finals week.",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: Date(timeIntervalSince1970: 1_781_193_600),
+            sortIndex: 0,
+            subGoals: [],
+            checkpoints: []
+        )
+        try await goalService.createGoal(goal, for: profile.id)
+        let plan = GoalPlanDraft(
+            goalID: goal.id,
+            summary: "Draft plan",
+            suggestedTimelineWeeks: 6,
+            checkpoints: [
+                GoalCheckpoint(title: "   ", dueDate: Date(timeIntervalSince1970: 1_780_329_600))
+            ],
+            nextActions: [
+                GoalStep(title: "   ", isComplete: false)
+            ]
+        )
+
+        #expect(!viewModel.hasApplicablePlanItems(plan))
+        await viewModel.applyPlan(plan, to: goal)
+
+        let storedGoal = try #require(goalService.goals.first)
+        #expect(storedGoal.subGoals.isEmpty)
+        #expect(storedGoal.checkpoints.isEmpty)
+        #expect(viewModel.goalActionID == nil)
+        #expect(viewModel.errorMessage?.contains("does not include") == true)
+        #expect(!analyticsService.events.contains("goal_plan_applied"))
+    }
+
+    @Test func goalsViewModelSkipsNormalizedDuplicatePlanItems() async throws {
+        let profile = testProfile(id: uniqueUserID("goals-plan-normalized"))
+        let goalService = TestGoalService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+        let existingCheckpointDate = Date(timeIntervalSince1970: 1_779_724_800)
+        let differentCheckpointDate = Date(timeIntervalSince1970: 1_780_329_600)
+        let goal = Goal(
+            title: "Raise chemistry grade",
+            detail: "Reach an A by finals week.",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: Date(timeIntervalSince1970: 1_781_193_600),
+            sortIndex: 0,
+            subGoals: [
+                GoalStep(title: "Review chapter notes", isComplete: true)
+            ],
+            checkpoints: [
+                GoalCheckpoint(title: "Meet advisor", dueDate: existingCheckpointDate)
+            ]
+        )
+        try await goalService.createGoal(goal, for: profile.id)
+        let plan = GoalPlanDraft(
+            goalID: goal.id,
+            summary: "Draft plan",
+            suggestedTimelineWeeks: 6,
+            checkpoints: [
+                GoalCheckpoint(title: " meet advisor ", dueDate: existingCheckpointDate.addingTimeInterval(60 * 60)),
+                GoalCheckpoint(title: "Meet advisor", dueDate: differentCheckpointDate)
+            ],
+            nextActions: [
+                GoalStep(title: " review chapter notes ", isComplete: false),
+                GoalStep(title: "Practice exam questions", isComplete: false)
+            ]
+        )
+
+        await viewModel.applyPlan(plan, to: goal)
+
+        let updated = try #require(goalService.goals.first)
+        #expect(updated.subGoals.map(\.title) == ["Review chapter notes", "Practice exam questions"])
+        #expect(updated.subGoals.first?.isComplete == true)
+        #expect(updated.checkpoints.map(\.title) == ["Meet advisor", "Meet advisor"])
+        #expect(updated.checkpoints.map(\.dueDate) == [existingCheckpointDate, differentCheckpointDate])
+        #expect(analyticsService.events.contains("goal_plan_applied"))
     }
 
     @Test func habitsCanBeCreatedPersistedAndUpdatedOutsideCheckInFlow() async throws {
