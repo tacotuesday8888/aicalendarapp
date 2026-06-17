@@ -52,6 +52,33 @@ struct OperationStatusPayload: Codable, Sendable {
     var success: Bool
 }
 
+struct SubscriptionSyncResponsePayload: Codable, Sendable {
+    var success: Bool
+    var subscription: SubscriptionSnapshotPayload
+
+    var state: SubscriptionState {
+        subscription.state
+    }
+}
+
+struct SubscriptionSnapshotPayload: Codable, Sendable {
+    var entitlement: String
+    var activePlan: String
+    var trialEligible: Bool
+    var entitlementIDs: [String]
+    var source: String
+    var lastSyncedAt: Date
+
+    var state: SubscriptionState {
+        SubscriptionState(
+            entitlement: EntitlementState(rawValue: entitlement) ?? .unknown,
+            activePlan: SubscriptionPlan(rawValue: activePlan) ?? .none,
+            trialEligible: trialEligible,
+            lastSyncedAt: lastSyncedAt
+        )
+    }
+}
+
 enum JSONValue: Codable, Hashable, Sendable {
     case string(String)
     case number(Double)

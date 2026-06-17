@@ -30,12 +30,17 @@ import {
   nextWorkflowCountsForReservation
 } from "../src/ai/usagePolicy.js";
 import { needsCrisisSafetyResponse, reviewVibeFeedbackForCrisis } from "../src/ai/safety.js";
+import {
+  deriveBetaProSnapshot,
+  subscriptionSyncResponse
+} from "../src/billing/revenuecat.js";
 
 process.env.AI_PROVIDER = "stub";
 
 async function runSmokeTest() {
   assertPromptContracts();
   assertUsagePolicy();
+  assertSubscriptionSyncContract();
 
   const assistantInput = {
     userID: "smoke-test-user",
@@ -166,6 +171,33 @@ async function runSmokeTest() {
   assert.equal(syllabusResult.courses[0]?.assignments[0]?.dueDate, null);
 
   console.log("AI smoke test passed.");
+}
+
+function assertSubscriptionSyncContract() {
+  const betaSnapshot = deriveBetaProSnapshot("beta-uid", { BETA_PRO_USER_IDS: "beta-uid, other-uid" });
+  assert.ok(betaSnapshot);
+  assert.equal(betaSnapshot.entitlement, "active");
+  assert.equal(betaSnapshot.activePlan, "none");
+  assert.deepEqual(betaSnapshot.entitlementIDs, ["beta_pro"]);
+  assert.equal(betaSnapshot.source, "beta_pro_user_ids");
+
+  assert.equal(deriveBetaProSnapshot("free-uid", { BETA_PRO_USER_IDS: "beta-uid" }), null);
+
+  const response = subscriptionSyncResponse(
+    betaSnapshot,
+    new Date("2026-04-26T12:00:00.000Z")
+  );
+  assert.deepEqual(response, {
+    success: true,
+    subscription: {
+      entitlement: "active",
+      activePlan: "none",
+      trialEligible: false,
+      entitlementIDs: ["beta_pro"],
+      source: "beta_pro_user_ids",
+      lastSyncedAt: "2026-04-26T12:00:00.000Z"
+    }
+  });
 }
 
 function assertUsagePolicy() {

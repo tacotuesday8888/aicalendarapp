@@ -93,17 +93,32 @@ final class SubscriptionService: SubscriptionServicing {
     }
 
     func refreshStatus(for userID: String) async throws -> SubscriptionState {
-        #if canImport(RevenueCat)
-        try ensureRevenueCatConfigured()
         let previousState = await store.currentState(for: userID)
+        #if canImport(RevenueCat)
+        guard Purchases.isConfigured else {
+            if let backendState = await syncBackendSubscriptionStatus(for: userID) {
+                await store.set(backendState, for: userID)
+                return backendState
+            }
+            try ensureRevenueCatConfigured()
+            return previousState
+        }
+
         let customerInfo = try await fetchCustomerInfo()
         let offerings = try? await fetchOfferings()
         let mapped = map(customerInfo, currentOffering: offerings?.current, fallbackPlan: previousState.activePlan)
-        await store.set(mapped, for: userID)
-        await syncBackendSubscriptionStatus(for: userID)
-        return mapped
+        let resolved = resolveBackendState(
+            await syncBackendSubscriptionStatus(for: userID),
+            localState: mapped
+        )
+        await store.set(resolved, for: userID)
+        return resolved
         #else
-        return await store.currentState(for: userID)
+        if let backendState = await syncBackendSubscriptionStatus(for: userID) {
+            await store.set(backendState, for: userID)
+            return backendState
+        }
+        return previousState
         #endif
     }
 
@@ -121,10 +136,13 @@ final class SubscriptionService: SubscriptionServicing {
 
         let customerInfo = try await purchase(package: package)
 
-        let state = map(customerInfo, currentOffering: current, fallbackPlan: plan)
+        let mapped = map(customerInfo, currentOffering: current, fallbackPlan: plan)
+        let state = resolveBackendState(
+            await syncBackendSubscriptionStatus(for: userID),
+            localState: mapped
+        )
         analyticsService?.track(event: "subscription_purchased", parameters: ["plan": plan.rawValue])
         await store.set(state, for: userID)
-        await syncBackendSubscriptionStatus(for: userID)
         return state
         #else
         throw AppError.integrationUnavailable("RevenueCat")
@@ -137,9 +155,12 @@ final class SubscriptionService: SubscriptionServicing {
         let previousState = await store.currentState(for: userID)
         let customerInfo = try await restorePurchases()
         let offerings = try? await fetchOfferings()
-        let state = map(customerInfo, currentOffering: offerings?.current, fallbackPlan: previousState.activePlan)
+        let mapped = map(customerInfo, currentOffering: offerings?.current, fallbackPlan: previousState.activePlan)
+        let state = resolveBackendState(
+            await syncBackendSubscriptionStatus(for: userID),
+            localState: mapped
+        )
         await store.set(state, for: userID)
-        await syncBackendSubscriptionStatus(for: userID)
         return state
         #else
         throw AppError.integrationUnavailable("RevenueCat")
@@ -181,14 +202,25 @@ final class SubscriptionService: SubscriptionServicing {
         #endif
     }
 
-    private func syncBackendSubscriptionStatus(for userID: String) async {
-        guard let backendFunctionService else { return }
+    private func syncBackendSubscriptionStatus(for userID: String) async -> SubscriptionState? {
+        guard let backendFunctionService else { return nil }
 
         do {
-            try await backendFunctionService.syncSubscriptionStatus(UserJobRequestPayload(userID: userID))
+            return try await backendFunctionService.syncSubscriptionStatus(UserJobRequestPayload(userID: userID))
         } catch {
             analyticsService?.record(error: error, context: "subscription_backend_sync")
+            return nil
         }
+    }
+
+    private func resolveBackendState(_ backendState: SubscriptionState?, localState: SubscriptionState) -> SubscriptionState {
+        guard let backendState else { return localState }
+
+        if localState.entitlement == .active && backendState.entitlement != .active {
+            return localState
+        }
+
+        return backendState
     }
 
     #if canImport(RevenueCat)

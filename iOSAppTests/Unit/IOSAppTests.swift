@@ -360,8 +360,10 @@ private final class TestPaywallService: PaywallServicing {
 
 private final class TestBackendFunctionService: BackendFunctionServicing {
     var exportResponse: ExportUserDataResponsePayload?
+    var subscriptionState = SubscriptionState.locked
     private(set) var deletedUserIDs = [String]()
     private(set) var exportedUserIDs = [String]()
+    private(set) var syncedSubscriptionUserIDs = [String]()
 
     func assistantRespond(_ request: AssistantRequestPayload) async throws -> AssistantThread {
         throw AppError.network(description: "Not implemented in test.")
@@ -385,7 +387,10 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
 
     func deleteImport(_ request: DeleteImportPayload) async throws {}
 
-    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws {}
+    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws -> SubscriptionState {
+        syncedSubscriptionUserIDs.append(request.userID)
+        return subscriptionState
+    }
 
     func deleteUserAccount(_ request: UserJobRequestPayload) async throws {
         deletedUserIDs.append(request.userID)
@@ -1051,6 +1056,54 @@ struct IOSAppTests {
         #expect(observedState?.entitlement == .active)
         #expect(observedState?.activePlan == .annual)
         #expect(observedState?.trialEligible == false)
+    }
+
+    @Test func subscriptionSyncResponseMapsBackendBetaSnapshot() throws {
+        let data = """
+        {
+          "success": true,
+          "subscription": {
+            "entitlement": "active",
+            "activePlan": "none",
+            "trialEligible": false,
+            "entitlementIDs": ["beta_pro"],
+            "source": "beta_pro_user_ids",
+            "lastSyncedAt": "2026-04-26T12:00:00.000Z"
+          }
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder.appDecoder().decode(SubscriptionSyncResponsePayload.self, from: data)
+        let state = response.state
+
+        #expect(response.success)
+        #expect(state.entitlement == .active)
+        #expect(state.activePlan == .none)
+        #expect(state.trialEligible == false)
+        #expect(state.lastSyncedAt == Date(timeIntervalSince1970: 1_777_204_800))
+    }
+
+    @Test func subscriptionServiceRefreshUsesBackendBetaStateWhenRevenueCatIsUnavailable() async throws {
+        let userID = uniqueUserID("subscription-beta")
+        let backendService = TestBackendFunctionService()
+        backendService.subscriptionState = SubscriptionState(
+            entitlement: .active,
+            activePlan: .none,
+            trialEligible: false,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_777_204_800)
+        )
+        let service = SubscriptionService()
+        service.backendFunctionService = backendService
+
+        let state = try await service.refreshStatus(for: userID)
+        var iterator = service.observeSubscriptionState(for: userID).makeAsyncIterator()
+        let observed = await iterator.next()
+
+        #expect(backendService.syncedSubscriptionUserIDs == [userID])
+        #expect(state.entitlement == .active)
+        #expect(state.activePlan == .none)
+        #expect(state.trialEligible == false)
+        #expect(observed?.entitlement == .active)
     }
 
     @Test func appSessionRefreshesSubscriptionAfterExistingUserContextLoads() async throws {
