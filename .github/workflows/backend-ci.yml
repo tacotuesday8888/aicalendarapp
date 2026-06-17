@@ -36,7 +36,7 @@ jobs:
   functions:
     name: Firebase Functions
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       CI: "true"
       AI_PROVIDER: stub
@@ -84,6 +84,5 @@ jobs:
           LIVE_SMOKE_DRY_RUN: "true"
           FUNCTIONS_BASE_URL: "https://example.invalid/functions"
 
-      - name: Validate Firebase rules parse in emulators
-        working-directory: ${{ github.workspace }}
-        run: npx -y firebase-tools@latest emulators:exec --project demo-aicalendarapp --only firestore,storage "node -e \"console.log('Firebase rules parsed')\""
+      - name: Run Firebase rules behavior tests
+        run: npm run rules:test
