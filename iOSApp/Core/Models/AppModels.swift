@@ -178,6 +178,20 @@ enum PaywallTrigger: String, Codable, CaseIterable, Sendable {
     case premiumRestore = "premium_restore"
 }
 
+enum PremiumFeature: String, Codable, CaseIterable, Sendable {
+    case assistant
+    case goalPlan
+    case syllabusImport
+
+    var paywallTrigger: PaywallTrigger {
+        switch self {
+        case .assistant: .premiumAssistant
+        case .goalPlan: .premiumGoalPlan
+        case .syllabusImport: .premiumSyllabusImport
+        }
+    }
+}
+
 enum AppRoute: Hashable, Sendable {
     case today
     case goal(id: String)
@@ -266,6 +280,11 @@ struct SubscriptionState: Codable, Hashable, Sendable {
         #else
         entitlement != .active
         #endif
+    }
+
+    func paywallTrigger(for feature: PremiumFeature, honoringDebugBypass: Bool = true) -> PaywallTrigger? {
+        let isLocked = honoringDebugBypass ? requiresPaywall : entitlement != .active
+        return isLocked ? feature.paywallTrigger : nil
     }
 
     nonisolated static var locked: SubscriptionState {

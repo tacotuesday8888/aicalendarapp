@@ -194,11 +194,20 @@ final class SettingsViewModel: ObservableObject {
 struct SettingsView: View {
     private let user: UserProfile
     private let container: AppContainer
+    private let isPremiumLocked: Bool
+    private let onRequirePremium: (PaywallTrigger) -> Void
     @StateObject private var viewModel: SettingsViewModel
 
-    init(user: UserProfile, container: AppContainer) {
+    init(
+        user: UserProfile,
+        container: AppContainer,
+        isPremiumLocked: Bool = false,
+        onRequirePremium: @escaping (PaywallTrigger) -> Void = { _ in }
+    ) {
         self.user = user
         self.container = container
+        self.isPremiumLocked = isPremiumLocked
+        self.onRequirePremium = onRequirePremium
         _viewModel = StateObject(wrappedValue: SettingsViewModel(
             user: user,
             authService: container.authService,
@@ -237,7 +246,12 @@ struct SettingsView: View {
                     ReflectionsFeature(user: viewModel.profile, container: container)
                 }
                 NavigationLink("Imports") {
-                    ImportsFeature(user: viewModel.profile, container: container)
+                    ImportsFeature(
+                        user: viewModel.profile,
+                        container: container,
+                        isPremiumLocked: isPremiumLocked,
+                        onRequirePremium: onRequirePremium
+                    )
                 }
             }
 

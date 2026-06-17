@@ -1083,6 +1083,18 @@ struct IOSAppTests {
         #expect(state.lastSyncedAt == Date(timeIntervalSince1970: 1_777_204_800))
     }
 
+    @Test func premiumFeatureGateMapsLockedStateToFeaturePaywallTriggers() {
+        let locked = SubscriptionState.locked
+        let unlocked = SubscriptionState.unlocked
+
+        #expect(locked.paywallTrigger(for: .assistant, honoringDebugBypass: false) == .premiumAssistant)
+        #expect(locked.paywallTrigger(for: .goalPlan, honoringDebugBypass: false) == .premiumGoalPlan)
+        #expect(locked.paywallTrigger(for: .syllabusImport, honoringDebugBypass: false) == .premiumSyllabusImport)
+        #expect(unlocked.paywallTrigger(for: .assistant, honoringDebugBypass: false) == nil)
+        #expect(unlocked.paywallTrigger(for: .goalPlan, honoringDebugBypass: false) == nil)
+        #expect(unlocked.paywallTrigger(for: .syllabusImport, honoringDebugBypass: false) == nil)
+    }
+
     @Test func subscriptionServiceRefreshUsesBackendBetaStateWhenRevenueCatIsUnavailable() async throws {
         let userID = uniqueUserID("subscription-beta")
         let backendService = TestBackendFunctionService()

@@ -8,6 +8,7 @@ enum AppError: LocalizedError, Equatable {
     case network(description: String)
     case decoding
     case permissionDenied(String)
+    case premiumRequired
     case unknown(String)
 
     var errorDescription: String? {
@@ -26,6 +27,8 @@ enum AppError: LocalizedError, Equatable {
             "We couldn't decode the latest data."
         case .permissionDenied(let resource):
             "Permission for \(resource) was denied."
+        case .premiumRequired:
+            "Start a subscription to use this premium feature."
         case .unknown(let message):
             message
         }
