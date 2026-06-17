@@ -70,7 +70,22 @@ npm --prefix backend/functions run rules:test
 
 CI also starts Firebase emulators against the demo project ID to test Firestore and Storage rule behavior without using real project credentials.
 
-Do not add deploys, secret writes, or real live smoke calls to normal PR CI. Real `functions:live-smoke` requires `FUNCTIONS_BASE_URL`, `FIREBASE_ID_TOKEN`, `SMOKE_USER_ID`, and usually `FIREBASE_APP_CHECK_TOKEN`; it sends an authenticated request and can write AI usage records. Run it only as a manual post-deploy check with a disposable or approved test account.
+Do not add deploys, secret writes, or real live smoke calls to normal PR CI. Real `functions:live-smoke` requires `FUNCTIONS_BASE_URL`, `FIREBASE_ID_TOKEN`, `SMOKE_USER_ID`, and usually `FIREBASE_APP_CHECK_TOKEN`. Run it only as a manual post-deploy check with a disposable or approved test account.
+
+The default live smoke matrix posts to:
+
+- `ai/run` with the safe `vibe_feedback` workflow. This can write AI usage records.
+- `syncRevenueCatSubscription`. Use a `SMOKE_USER_ID` that is either listed in `BETA_PRO_USER_IDS` or has a real RevenueCat subscriber state available through `REVENUECAT_SECRET_API_KEY`.
+- `exportUserData`. This reads the signed-in user's export payload and should return the requested `userID`, `profile`, and `collections`.
+
+`deleteUserAccount` is intentionally excluded from the default matrix. To include it, use only a disposable account and set both:
+
+```bash
+LIVE_SMOKE_INCLUDE_DELETE_ACCOUNT=true
+LIVE_SMOKE_CONFIRM_DELETE_ACCOUNT="DELETE <same uid as SMOKE_USER_ID>"
+```
+
+Expected result: the script logs each function as passed and then prints `Live function smoke matrix passed`. If `syncRevenueCatSubscription` fails because the user is not a beta UID and has no RevenueCat state, either add that disposable UID to `BETA_PRO_USER_IDS` and redeploy, or use a disposable UID that has completed RevenueCat purchase/restore setup.
 
 ## App Check rollout
 
@@ -78,7 +93,7 @@ Do not add deploys, secret writes, or real live smoke calls to normal PR CI. Rea
 2. Build and run a Debug app. The Firebase App Check debug provider logs a debug token in the Xcode console.
 3. Register that debug token in Firebase Console for the iOS app.
 4. Deploy functions with `APP_CHECK_MODE=monitor`. In monitor mode, missing or invalid App Check tokens are logged but requests are not blocked.
-5. Send one authenticated live request from the app, or run:
+5. Send authenticated live requests from the app, or run the backend smoke matrix:
 
    ```bash
    FUNCTIONS_BASE_URL="https://us-central1-your-project-id.cloudfunctions.net/" \
