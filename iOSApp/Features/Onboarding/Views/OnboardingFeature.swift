@@ -133,6 +133,7 @@ final class OnboardingViewModel: ObservableObject {
 struct OnboardingView: View {
     @StateObject private var viewModel: OnboardingViewModel
     @ObservedObject var sessionViewModel: AppSessionViewModel
+    @State private var presentedPaywallTrigger: PaywallTrigger?
 
     init(viewModel: OnboardingViewModel, sessionViewModel: AppSessionViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -180,6 +181,7 @@ struct OnboardingView: View {
                     TextEditor(text: $viewModel.syllabusText)
                         .frame(minHeight: 120)
                     Button("Parse syllabus") {
+                        guard !requirePremiumIfLocked() else { return }
                         Task { await viewModel.importSyllabus() }
                     }
                     .disabled(viewModel.isParsingSyllabus || viewModel.isLoading || viewModel.syllabusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -196,6 +198,7 @@ struct OnboardingView: View {
                             }
                         }
                         Button(importedJob.status == .committed ? "Review imported syllabus" : "Review before import") {
+                            guard !requirePremiumIfLocked() else { return }
                             viewModel.showingImportReview = true
                         }
                     }
@@ -244,11 +247,37 @@ struct OnboardingView: View {
                         title: "Review Syllabus",
                         commitButtonTitle: importedJob.status == .committed ? "Update Import" : "Import to Planner"
                     ) { updatedJob in
+                        guard !requirePremiumIfLocked() else {
+                            throw AppError.premiumRequired
+                        }
                         try await viewModel.commitImportedJob(updatedJob)
                     }
                 }
             }
+            .sheet(item: $presentedPaywallTrigger) { trigger in
+                PaywallView(
+                    viewModel: PaywallViewModel(
+                        user: viewModel.profile,
+                        trigger: trigger,
+                        subscriptionService: sessionViewModel.container.subscriptionService,
+                        paywallService: sessionViewModel.container.paywallService,
+                        analyticsService: sessionViewModel.container.analyticsService
+                    ),
+                    onUnlocked: {
+                        presentedPaywallTrigger = nil
+                        Task { await sessionViewModel.refreshSubscription() }
+                    }
+                )
+            }
             .swGlassListChrome()
         }
+    }
+
+    private func requirePremiumIfLocked() -> Bool {
+        guard let trigger = sessionViewModel.subscriptionState.paywallTrigger(for: .syllabusImport) else {
+            return false
+        }
+        presentedPaywallTrigger = trigger
+        return true
     }
 }

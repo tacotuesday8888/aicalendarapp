@@ -127,7 +127,14 @@ struct AppShellView: View {
                             .tabItem { Label(AppTab.sessions.title, systemImage: AppTab.sessions.symbolName) }
                             .tag(AppTab.sessions)
 
-                        SettingsView(user: user, container: container)
+                        SettingsView(
+                            user: user,
+                            container: container,
+                            isPremiumLocked: sessionViewModel.subscriptionState.requiresPaywall,
+                            onRequirePremium: { trigger in
+                                presentedPaywallTrigger = trigger
+                            }
+                        )
                             .tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.symbolName) }
                             .tag(AppTab.settings)
                     }
@@ -135,9 +142,7 @@ struct AppShellView: View {
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button {
-                                if sessionViewModel.subscriptionState.requiresPaywall {
-                                    presentedPaywallTrigger = .premiumAssistant
-                                } else {
+                                if !requirePremium(.assistant) {
                                     showAssistant = true
                                 }
                             } label: {
@@ -185,12 +190,22 @@ struct AppShellView: View {
         case .session:
             selectedTab = .sessions
         case .assistant:
-            showAssistant = true
+            if !requirePremium(.assistant) {
+                showAssistant = true
+            }
         case .paywall(let trigger):
             presentedPaywallTrigger = trigger
         case .importedSyllabus:
             selectedTab = .calendar
         }
+    }
+
+    private func requirePremium(_ feature: PremiumFeature) -> Bool {
+        guard let trigger = sessionViewModel.subscriptionState.paywallTrigger(for: feature) else {
+            return false
+        }
+        presentedPaywallTrigger = trigger
+        return true
     }
 }
 

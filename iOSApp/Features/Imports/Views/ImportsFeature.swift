@@ -138,8 +138,17 @@ final class ImportsViewModel: ObservableObject {
 struct ImportsFeature: View {
     @StateObject private var viewModel: ImportsViewModel
     @State private var showFileImporter = false
+    private let isPremiumLocked: Bool
+    private let onRequirePremium: (PaywallTrigger) -> Void
 
-    init(user: UserProfile, container: AppContainer) {
+    init(
+        user: UserProfile,
+        container: AppContainer,
+        isPremiumLocked: Bool = false,
+        onRequirePremium: @escaping (PaywallTrigger) -> Void = { _ in }
+    ) {
+        self.isPremiumLocked = isPremiumLocked
+        self.onRequirePremium = onRequirePremium
         _viewModel = StateObject(wrappedValue: ImportsViewModel(
             user: user,
             syllabusImportService: container.syllabusImportService,
@@ -154,6 +163,7 @@ struct ImportsFeature: View {
                     .frame(minHeight: 140)
 
                 Button {
+                    guard !requirePremiumIfLocked() else { return }
                     Task { await viewModel.importText() }
                 } label: {
                     if viewModel.isImporting {
@@ -168,6 +178,7 @@ struct ImportsFeature: View {
 
             Section("Import a file") {
                 Button("Choose file") {
+                    guard !requirePremiumIfLocked() else { return }
                     showFileImporter = true
                 }
                 .disabled(viewModel.isImporting)
@@ -189,11 +200,13 @@ struct ImportsFeature: View {
                     }
 
                     Button("Commit import") {
+                        guard !requirePremiumIfLocked() else { return }
                         Task { try? await viewModel.commit(job) }
                     }
                     .disabled(viewModel.committingJobID != nil)
 
                     Button("Review before commit") {
+                        guard !requirePremiumIfLocked() else { return }
                         viewModel.reviewingJob = job
                     }
                 }
@@ -242,6 +255,7 @@ struct ImportsFeature: View {
         ) { result in
             switch result {
             case .success(let url):
+                guard !requirePremiumIfLocked() else { return }
                 Task { await viewModel.importFile(at: url) }
             case .failure(let error):
                 viewModel.errorMessage = AppError.wrap(error, fallback: "Unable to access the selected file.").errorDescription
@@ -253,9 +267,18 @@ struct ImportsFeature: View {
                 title: "Review Import",
                 commitButtonTitle: job.status == .committed ? "Update Import" : "Commit Import"
             ) { updatedJob in
+                guard !requirePremiumIfLocked() else {
+                    throw AppError.premiumRequired
+                }
                 try await viewModel.commit(updatedJob)
             }
         }
         .swGlassListChrome()
+    }
+
+    private func requirePremiumIfLocked() -> Bool {
+        guard isPremiumLocked else { return false }
+        onRequirePremium(PremiumFeature.syllabusImport.paywallTrigger)
+        return true
     }
 }
