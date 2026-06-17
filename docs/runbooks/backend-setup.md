@@ -65,9 +65,10 @@ npm --prefix backend/functions run typecheck:scripts
 npm --prefix backend/functions run build
 AI_PROVIDER=stub npm --prefix backend/functions run ai:smoke
 LIVE_SMOKE_DRY_RUN=true FUNCTIONS_BASE_URL=https://example.invalid/functions npm --prefix backend/functions run functions:live-smoke
+npm --prefix backend/functions run rules:test
 ```
 
-CI also starts Firebase emulators against the demo project ID to catch Firestore and Storage rule parse failures without using real project credentials.
+CI also starts Firebase emulators against the demo project ID to test Firestore and Storage rule behavior without using real project credentials.
 
 Do not add deploys, secret writes, or real live smoke calls to normal PR CI. Real `functions:live-smoke` requires `FUNCTIONS_BASE_URL`, `FIREBASE_ID_TOKEN`, `SMOKE_USER_ID`, and usually `FIREBASE_APP_CHECK_TOKEN`; it sends an authenticated request and can write AI usage records. Run it only as a manual post-deploy check with a disposable or approved test account.
 

@@ -11,6 +11,8 @@
     "build": "tsc -p tsconfig.json",
     "genkit:ui": "genkit start -- npx tsx --watch src/index.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "rules:test": "cd ../.. && npm --prefix backend/functions exec -- firebase emulators:exec --project demo-aicalendarapp --only firestore,storage \"npm --prefix backend/functions run rules:test:run\"",
+    "rules:test:run": "tsx scripts/rulesBehaviorTest.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "serve": "npx -y firebase-tools@latest emulators:start --only functions",
     "deploy": "npx -y firebase-tools@latest deploy --only functions"
@@ -23,6 +25,9 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "firebase": "^12.14.0",
+    "firebase-tools": "^15.20.0",
     "genkit-cli": "^1.34.0",
     "tsx": "^4.22.0",
     "typescript": "^5.8.2"
