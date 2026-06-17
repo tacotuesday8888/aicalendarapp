@@ -67,7 +67,7 @@ protocol BackendFunctionServicing: AnyObject {
     func importSyllabusFile(_ request: ImportFileRequestPayload) async throws -> ImportJob
     func commitImport(_ request: ImportCommitPayload) async throws
     func deleteImport(_ request: DeleteImportPayload) async throws
-    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws
+    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws -> SubscriptionState
     func deleteUserAccount(_ request: UserJobRequestPayload) async throws
     func exportUserData(_ request: UserJobRequestPayload) async throws -> ExportUserDataResponsePayload
 }

@@ -78,13 +78,14 @@ final class BackendFunctionService: BackendFunctionServicing {
         )
     }
 
-    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws {
-        _ = try await invokeRequired(
+    func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws -> SubscriptionState {
+        let response = try await invokeRequired(
             "syncRevenueCatSubscription",
             body: request,
-            decode: OperationStatusPayload.self,
+            decode: SubscriptionSyncResponsePayload.self,
             feature: "Subscription backend sync"
         )
+        return response.state
     }
 
     func deleteUserAccount(_ request: UserJobRequestPayload) async throws {

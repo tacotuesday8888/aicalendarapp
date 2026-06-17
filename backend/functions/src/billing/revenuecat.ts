@@ -7,6 +7,7 @@ import { revenueCatSyncOptions, revenueCatWebhookOptions } from "../shared/funct
 import { userJobRequestSchema } from "../shared/contracts.js";
 import { requireMatchingUser } from "../shared/context.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
+import { isBetaProUserID } from "../ai/usagePolicy.js";
 
 type RevenueCatWebhookEvent = {
   id?: string;
@@ -39,7 +40,19 @@ type SubscriptionSnapshot = {
   entitlement: "active" | "inactive";
   activePlan: string;
   entitlementIDs: string[];
-  source: "revenuecat_rest_api" | "revenuecat_webhook_fallback" | "revenuecat_transfer";
+  source: "revenuecat_rest_api" | "revenuecat_webhook_fallback" | "revenuecat_transfer" | "beta_pro_user_ids";
+};
+
+type SubscriptionSyncResponse = {
+  success: true;
+  subscription: {
+    entitlement: "active" | "inactive";
+    activePlan: "monthly" | "annual" | "none";
+    trialEligible: boolean;
+    entitlementIDs: string[];
+    source: SubscriptionSnapshot["source"];
+    lastSyncedAt: string;
+  };
 };
 
 function uniqueUserIDs(values: Array<string | undefined>): string[] {
@@ -110,6 +123,19 @@ function deriveTransferDestinationSnapshot(event: RevenueCatWebhookEvent): Subsc
   return {
     ...snapshot,
     source: "revenuecat_transfer"
+  };
+}
+
+export function deriveBetaProSnapshot(userID: string, env: NodeJS.ProcessEnv = process.env): SubscriptionSnapshot | null {
+  if (!isBetaProUserID(userID, env)) {
+    return null;
+  }
+
+  return {
+    entitlement: "active",
+    activePlan: "none",
+    entitlementIDs: ["beta_pro"],
+    source: "beta_pro_user_ids"
   };
 }
 
@@ -190,16 +216,48 @@ async function persistSubscriptionSnapshot(
   }, { merge: true });
 }
 
+export function subscriptionSyncResponse(
+  snapshot: SubscriptionSnapshot,
+  syncedAt: Date = new Date()
+): SubscriptionSyncResponse {
+  return {
+    success: true,
+    subscription: {
+      entitlement: snapshot.entitlement,
+      activePlan: appPlanFromProductID(snapshot.activePlan),
+      trialEligible: snapshot.entitlement !== "active",
+      entitlementIDs: snapshot.entitlementIDs,
+      source: snapshot.source,
+      lastSyncedAt: syncedAt.toISOString()
+    }
+  };
+}
+
 export const syncRevenueCatSubscription = onAuthenticatedJsonRequest(userJobRequestSchema, async ({ authUID, data }) => {
   const userID = requireMatchingUser(authUID, data.userID);
   const secretApiKey = process.env.REVENUECAT_SECRET_API_KEY?.trim();
+  const betaSnapshot = deriveBetaProSnapshot(userID);
+  const syncEventID = `subscriber-sync-${userID}-${Date.now()}`;
+
+  if (betaSnapshot) {
+    await persistSubscriptionSnapshot(
+      userID,
+      betaSnapshot,
+      {
+        id: syncEventID,
+        type: "BETA_PRO_SYNC"
+      },
+      syncEventID
+    );
+
+    return subscriptionSyncResponse(betaSnapshot);
+  }
 
   if (!secretApiKey) {
     throw new HttpsError("failed-precondition", "RevenueCat subscriber sync is not configured.");
   }
 
   const snapshot = await fetchRevenueCatSubscriberSnapshot(userID, secretApiKey);
-  const syncEventID = `subscriber-sync-${userID}-${Date.now()}`;
   await persistSubscriptionSnapshot(
     userID,
     snapshot,
@@ -210,7 +268,7 @@ export const syncRevenueCatSubscription = onAuthenticatedJsonRequest(userJobRequ
     syncEventID
   );
 
-  return { success: true };
+  return subscriptionSyncResponse(snapshot);
 }, revenueCatSyncOptions);
 
 export const revenueCatWebhook = onRequest({
