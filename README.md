@@ -9,8 +9,12 @@ AI Efficiency Calendar App is an iPhone-first SwiftUI planning app for students.
 - `backend/functions/` - Firebase Cloud Functions for privileged server work, including AI workflows via Genkit.
 - `backend/firestore/` - Firestore rules and indexes.
 - `backend/storage/` - Firebase Storage rules.
-- `shared/` - Shared contracts and analytics event names.
-- `docs/` - Product, architecture, and runbook documentation.
+
+## Public Repository Scope
+
+This repository is prepared to expose product source code, test code, Firebase rules, GitHub Actions workflows, and placeholder configuration templates.
+
+Private planning notes, launch checklists, internal audits, deployment runbooks, live project identifiers, real service configuration, signing assets, and local environment files are intentionally excluded. Keep those materials in a private workspace.
 
 ## Run the iOS App
 
@@ -40,12 +44,9 @@ Use the templates in the repo as starting points:
 
 ## Backend Basics
 
-Firebase Cloud Functions are the main backend boundary for AI work, imports, subscription webhooks, account export, and account deletion. See:
+Firebase Cloud Functions are the main backend boundary for AI work, imports, subscription webhooks, account export, and account deletion.
 
-- `shared/contracts/backend-functions.md`
-- `docs/runbooks/backend-setup.md`
-
-Firestore and Storage rules live in `backend/firestore/` and `backend/storage/`.
+Firestore and Storage rules live in `backend/firestore/` and `backend/storage/`. Deployment runbooks and live service setup notes are intentionally not included in the public tree.
 
 ## Safety
 

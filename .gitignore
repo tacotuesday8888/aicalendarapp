@@ -6,6 +6,9 @@ xcuserdata/
 *.xcuserstate
 .gemini/
 .firebase/
+.context/
+private/
+docs/private/
 
 backend/functions/lib/
 backend/functions/node_modules/
@@ -37,3 +40,16 @@ coverage.xml
 GoogleService-Info.plist
 Secrets.xcconfig
 Secrets.*.xcconfig
+*.mobileprovision
+*.provisionprofile
+*.p8
+*.p12
+*.cer
+*.pem
+*.key
+*.keystore
+ExportOptions.plist
+fastlane/.env*
+fastlane/Appfile
+fastlane/Matchfile
+fastlane/Deliverfile
