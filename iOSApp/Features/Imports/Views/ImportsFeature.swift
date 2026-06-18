@@ -45,12 +45,13 @@ final class ImportsViewModel: ObservableObject {
     }
 
     func importText() async {
-        guard !importedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isImporting else { return }
+        let trimmedText = importedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty, !isImporting else { return }
         isImporting = true
         defer { isImporting = false }
 
         do {
-            let job = try await syllabusImportService.importText(importedText, for: user.id)
+            let job = try await syllabusImportService.importText(trimmedText, for: user.id)
             latestJob = job
             reviewingJob = job
             statusMessage = "Parsed \(job.extractedAssignments.count) assignments from text."
