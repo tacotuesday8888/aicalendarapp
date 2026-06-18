@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 
 type JsonObject = Record<string, unknown>;
+type SmokeRequestBody = JsonObject | (() => JsonObject);
 type SmokeRequest = {
   name: string;
   path: string;
-  body: JsonObject;
+  body: SmokeRequestBody;
+  bodyKeys?: string[];
   assertResponse: (responseJSON: unknown) => void;
 };
 type LiveSmokeState = {
@@ -13,6 +15,7 @@ type LiveSmokeState = {
   baselineAIUsageIDs?: Set<string>;
   goalPlanDraftID?: string;
   syllabusImportDraftID?: string;
+  syllabusImportCommitted: boolean;
 };
 
 const PREMIUM_AI_WORKFLOWS = ["assistant_chat", "goal_plan_generation", "syllabus_import"] as const;
@@ -51,7 +54,7 @@ async function runLiveFunctionSmokeTest() {
             name: request.name,
             method: "POST",
             url: urlFor(functionsBaseURL, request.path).toString(),
-            bodyKeys: Object.keys(request.body)
+            bodyKeys: request.bodyKeys ?? Object.keys(resolveRequestBody(request))
           }))
         },
         null,
@@ -66,7 +69,7 @@ async function runLiveFunctionSmokeTest() {
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify(request.body)
+      body: JSON.stringify(resolveRequestBody(request))
     });
     const responseText = await response.text();
     const responseJSON = parseJSON(responseText);
@@ -87,7 +90,8 @@ function liveSmokeRequests(userID: string): SmokeRequest[] {
   const currentDate = process.env.SMOKE_CURRENT_DATE?.trim() || new Date().toISOString();
   const state: LiveSmokeState = {
     premiumAIIncluded: process.env.LIVE_SMOKE_INCLUDE_PREMIUM_AI === "true",
-    assistantChatCompleted: false
+    assistantChatCompleted: false,
+    syllabusImportCommitted: false
   };
   const requests: SmokeRequest[] = [
     {
@@ -200,6 +204,23 @@ function liveSmokeRequests(userID: string): SmokeRequest[] {
         assertResponse: (responseJSON) => {
           const response = assertSyllabusImportResponse(responseJSON);
           state.syllabusImportDraftID = String(response.draftID);
+        }
+      },
+      {
+        name: "commitImportJob syllabus_import",
+        path: "commitImportJob",
+        bodyKeys: ["userID", "job"],
+        body: () => ({
+          userID,
+          job: {
+            id: requiredStateString(state.syllabusImportDraftID, "captured syllabus import draft ID"),
+            extractedCourses: [],
+            extractedAssignments: []
+          }
+        }),
+        assertResponse: (responseJSON) => {
+          assertOperationStatusResponse(responseJSON, "commitImportJob");
+          state.syllabusImportCommitted = true;
         }
       }
     );
@@ -355,6 +376,8 @@ function assertExportUserDataResponse(responseJSON: unknown, userID: string, sta
 
     assertNonEmptyString(state.syllabusImportDraftID, "captured syllabus import draft ID");
     assertCollectionContainsID(collections, "imports", state.syllabusImportDraftID);
+    assert.ok(state.syllabusImportCommitted, "Expected syllabus import smoke job to commit before export verification.");
+    assertCommittedImportPlannerData(collections, state.syllabusImportDraftID);
     assertPremiumAIUsageRecords(collections, state.baselineAIUsageIDs);
   }
 
@@ -366,6 +389,11 @@ function assertDeleteUserAccountResponse(responseJSON: unknown, userID: string) 
   assert.equal(responseJSON.success, true, "Expected deleteUserAccount success=true.");
   assert.equal(responseJSON.userID, userID, "Expected deleteUserAccount to return the deleted userID.");
   assert.ok(isJsonObject(responseJSON.deletedCollections), "Expected deleteUserAccount deletedCollections object.");
+}
+
+function assertOperationStatusResponse(responseJSON: unknown, label: string) {
+  assert.ok(isJsonObject(responseJSON), `Expected ${label} to return a JSON object.`);
+  assert.equal(responseJSON.success, true, `Expected ${label} success=true.`);
 }
 
 function assertAIWorkflowResponse(responseJSON: unknown, workflow: string): { draftID: unknown; result: JsonObject } {
@@ -386,9 +414,36 @@ function assertExportCollections(responseJSON: JsonObject): JsonObject {
 }
 
 function assertCollectionContainsID(collections: JsonObject, collectionName: string, id: string) {
+  collectionRecordByID(collections, collectionName, id);
+}
+
+function collectionRecordByID(collections: JsonObject, collectionName: string, id: string): JsonObject {
   const records = assertArrayProperty(collections, collectionName, `exportUserData collections.${collectionName}`);
-  const hasRecord = records.some((record) => isJsonObject(record) && record.id === id);
-  assert.ok(hasRecord, `Expected exportUserData collections.${collectionName} to contain ${id}.`);
+  const record = records.find((value): value is JsonObject => isJsonObject(value) && value.id === id);
+  assert.ok(record, `Expected exportUserData collections.${collectionName} to contain ${id}.`);
+  return record;
+}
+
+function assertCommittedImportPlannerData(collections: JsonObject, importID: string) {
+  const importJob = collectionRecordByID(collections, "imports", importID);
+  assert.equal(importJob.status, "committed", "Expected committed syllabus import job status.");
+
+  const extractedCourses = assertArrayProperty(importJob, "extractedCourses", "committed import extractedCourses");
+  const extractedAssignments = assertArrayProperty(importJob, "extractedAssignments", "committed import extractedAssignments");
+  assert.ok(extractedCourses.length > 0, "Expected committed import to include at least one extracted course.");
+  assert.ok(extractedAssignments.length > 0, "Expected committed import to include at least one extracted assignment.");
+
+  extractedCourses.forEach((course, index) => {
+    assert.ok(isJsonObject(course), `Expected committed import extractedCourses[${index}] object.`);
+    assertNonEmptyString(course.id, `committed import extractedCourses[${index}].id`);
+    assertCollectionContainsID(collections, "courses", course.id);
+  });
+
+  extractedAssignments.forEach((assignment, index) => {
+    assert.ok(isJsonObject(assignment), `Expected committed import extractedAssignments[${index}] object.`);
+    assertNonEmptyString(assignment.id, `committed import extractedAssignments[${index}].id`);
+    assertCollectionContainsID(collections, "assignments", assignment.id);
+  });
 }
 
 function assertPremiumAIUsageRecords(collections: JsonObject, baselineAIUsageIDs: Set<string>) {
@@ -442,6 +497,15 @@ function assertOptionalDraftID(value: unknown, label: string) {
   if (typeof value === "string") {
     assert.ok(value.length > 0, `Expected non-empty ${label} when present.`);
   }
+}
+
+function requiredStateString(value: unknown, label: string): string {
+  assertNonEmptyString(value, label);
+  return value;
+}
+
+function resolveRequestBody(request: SmokeRequest): JsonObject {
+  return typeof request.body === "function" ? request.body() : request.body;
 }
 
 function requireEnv(name: string): string {
