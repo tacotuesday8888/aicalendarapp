@@ -1,18 +1,30 @@
 const DEFAULT_PROVIDER = "stub";
-const DEFAULT_VERTEX_LOCATION = "us-central1";
-const DEFAULT_VERTEX_MODEL = "gemini-2.5-flash-lite";
+const DEFAULT_VERTEX_LOCATION = "global";
+const DEFAULT_VERTEX_MODEL = "gemini-3.1-flash-lite";
 const DEFAULT_MAX_OUTPUT_TOKENS = 2048;
 
 export type AIProviderMode = "stub" | "vertex";
 
-export function getAIProviderMode(): AIProviderMode {
-  const rawProvider = (process.env.AI_PROVIDER ?? DEFAULT_PROVIDER).trim().toLowerCase();
+export function getAIProviderMode(env: NodeJS.ProcessEnv = process.env): AIProviderMode {
+  const rawProvider = env.AI_PROVIDER?.trim().toLowerCase();
+
+  if (!rawProvider) {
+    if (requiresExplicitAIProvider(env)) {
+      throw new Error("AI_PROVIDER is required in managed Firebase runtimes. Set AI_PROVIDER=vertex.");
+    }
+
+    return DEFAULT_PROVIDER;
+  }
 
   if (rawProvider === "vertex" || rawProvider === "vertexai" || rawProvider === "vertex-ai") {
     return "vertex";
   }
 
-  return "stub";
+  if (rawProvider === "stub") {
+    return "stub";
+  }
+
+  throw new Error(`Unsupported AI_PROVIDER "${rawProvider}". Expected "vertex" or "stub".`);
 }
 
 export function getAIModelName(): string {
@@ -32,4 +44,12 @@ export function getAIMaxOutputTokens(): number {
 export function isAIStubFallbackEnabled(): boolean {
   const rawValue = process.env.AI_ENABLE_STUB_FALLBACK?.trim().toLowerCase();
   return rawValue === "true" || rawValue === "1" || rawValue === "yes";
+}
+
+function requiresExplicitAIProvider(env: NodeJS.ProcessEnv): boolean {
+  if (env.CI === "true" || env.FUNCTIONS_EMULATOR === "true") {
+    return false;
+  }
+
+  return Boolean(env.K_SERVICE || env.GAE_SERVICE || env.FUNCTION_TARGET || env.FUNCTION_SIGNATURE_TYPE);
 }

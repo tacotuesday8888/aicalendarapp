@@ -32,6 +32,9 @@ import SuperwallKit
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     private let configuration = AppConfiguration.shared
     private let logger = AppLogger(category: "bootstrap")
+    #if canImport(RevenueCat) && canImport(SuperwallKit)
+    private var superwallPurchaseController: AICalendarRevenueCatPurchaseController?
+    #endif
 
     func application(
         _ application: UIApplication,
@@ -166,7 +169,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
 
         #if canImport(SuperwallKit)
+        #if canImport(RevenueCat)
+        let purchaseController = AICalendarRevenueCatPurchaseController(
+            entitlementID: configuration.revenueCatEntitlementID
+        )
+        superwallPurchaseController = purchaseController
+        Superwall.configure(apiKey: configuration.superwallAPIKey, purchaseController: purchaseController)
+        purchaseController.syncSubscriptionStatus()
+        #else
         Superwall.configure(apiKey: configuration.superwallAPIKey)
+        #endif
         logger.info("Configured Superwall.")
         #else
         logger.notice("Superwall SDK not linked.")
@@ -228,9 +240,73 @@ extension AppDelegate: MessagingDelegate {
 }
 #endif
 
+#if canImport(RevenueCat) && canImport(SuperwallKit)
+private final class AICalendarRevenueCatPurchaseController: PurchaseController {
+    private let entitlementID: String
+
+    init(entitlementID: String) {
+        self.entitlementID = entitlementID
+    }
+
+    @MainActor
+    func purchase(product: SuperwallKit.StoreProduct) async -> PurchaseResult {
+        do {
+            let revenueCatProduct: RevenueCat.StoreProduct
+            if let sk2Product = product.sk2Product {
+                revenueCatProduct = RevenueCat.StoreProduct(sk2Product: sk2Product)
+            } else if let sk1Product = product.sk1Product {
+                revenueCatProduct = RevenueCat.StoreProduct(sk1Product: sk1Product)
+            } else {
+                return .failed(AppError.dataNotFound)
+            }
+            let result = try await Purchases.shared.purchase(product: revenueCatProduct)
+            syncSubscriptionStatus(customerInfo: result.customerInfo)
+            return .purchased
+        } catch let error as RevenueCat.ErrorCode {
+            return error == .paymentPendingError ? .pending : .failed(error)
+        } catch {
+            return .failed(error)
+        }
+    }
+
+    @MainActor
+    func restorePurchases() async -> RestorationResult {
+        do {
+            let customerInfo = try await Purchases.shared.restorePurchases()
+            syncSubscriptionStatus(customerInfo: customerInfo)
+            return .restored
+        } catch {
+            return .failed(error)
+        }
+    }
+
+    func syncSubscriptionStatus() {
+        Task { @MainActor in
+            do {
+                let customerInfo = try await Purchases.shared.customerInfo()
+                syncSubscriptionStatus(customerInfo: customerInfo)
+            } catch {
+                Superwall.shared.subscriptionStatus = .unknown
+            }
+        }
+    }
+
+    @MainActor
+    private func syncSubscriptionStatus(customerInfo: RevenueCat.CustomerInfo) {
+        let entitlement = customerInfo.entitlements[entitlementID]
+        Superwall.shared.subscriptionStatus = entitlement?.isActive == true
+            ? .active([Entitlement(id: entitlementID)])
+            : .inactive
+    }
+}
+#endif
+
 #if canImport(RevenueCat)
 extension AppDelegate: PurchasesDelegate {
     func purchases(_ purchases: Purchases, receivedUpdated customerInfo: RevenueCat.CustomerInfo) {
+        #if canImport(SuperwallKit)
+        superwallPurchaseController?.syncSubscriptionStatus()
+        #endif
         guard let userID = AppContainer.shared.authService.currentUserID else { return }
         Task {
             do {

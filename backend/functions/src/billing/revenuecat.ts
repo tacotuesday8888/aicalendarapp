@@ -55,6 +55,16 @@ type SubscriptionSyncResponse = {
   };
 };
 
+const DEFAULT_REVENUECAT_ENTITLEMENT_ID = "aiefficiencyapp Pro";
+
+export function configuredRevenueCatEntitlementIDs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const rawValue = env.REVENUECAT_ENTITLEMENT_ID ?? env.REVENUECAT_ENTITLEMENT_IDS ?? DEFAULT_REVENUECAT_ENTITLEMENT_ID;
+  return rawValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 function uniqueUserIDs(values: Array<string | undefined>): string[] {
   return Array.from(new Set(
     values
@@ -76,9 +86,12 @@ function parseIsoTimestamp(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function deriveSnapshotFromEvent(event: RevenueCatWebhookEvent): SubscriptionSnapshot {
+export function deriveSnapshotFromEvent(event: RevenueCatWebhookEvent): SubscriptionSnapshot {
+  const allowedEntitlementIDs = new Set(configuredRevenueCatEntitlementIDs());
   const entitlementIDs = Array.isArray(event.entitlement_ids)
-    ? event.entitlement_ids.filter((value): value is string => typeof value === "string" && value.length > 0)
+    ? event.entitlement_ids.filter((value): value is string =>
+      typeof value === "string" && value.length > 0 && allowedEntitlementIDs.has(value)
+    )
     : [];
   const hasEntitlement = entitlementIDs.length > 0;
   const expirationAtMs = parseTimestampMs(event.expiration_at_ms);
@@ -143,9 +156,14 @@ function expirationTimestampForEntitlement(entitlement: RevenueCatSubscriberEnti
   return parseIsoTimestamp(entitlement.expires_date) ?? Number.MAX_SAFE_INTEGER;
 }
 
-function deriveSnapshotFromSubscriberResponse(response: RevenueCatSubscriberResponse): SubscriptionSnapshot {
+export function deriveSnapshotFromSubscriberResponse(response: RevenueCatSubscriberResponse): SubscriptionSnapshot {
+  const allowedEntitlementIDs = new Set(configuredRevenueCatEntitlementIDs());
   const entitlements = response.subscriber?.entitlements ?? {};
-  const activeEntitlements = Object.entries(entitlements).filter(([, entitlement]) => {
+  const activeEntitlements = Object.entries(entitlements).filter(([identifier, entitlement]) => {
+    if (!allowedEntitlementIDs.has(identifier)) {
+      return false;
+    }
+
     const expiresAt = parseIsoTimestamp(entitlement.expires_date);
     return expiresAt === null || expiresAt > Date.now();
   });

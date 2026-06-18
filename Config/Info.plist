@@ -67,6 +67,8 @@
 	<string>Receive reminders for deadlines, study sessions, habits, and daily check-ins.</string>
 	<key>RevenueCatAPIKey</key>
 	<string>$(REVENUECAT_API_KEY)</string>
+	<key>RevenueCatEntitlementID</key>
+	<string>$(REVENUECAT_ENTITLEMENT_ID)</string>
 	<key>SuperwallAPIKey</key>
 	<string>$(SUPERWALL_API_KEY)</string>
 	<key>PrivacyPolicyURL</key>

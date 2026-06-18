@@ -8,7 +8,9 @@ name: iOS CI
       - "iOSAppTests/**"
       - "iOSAppUITests/**"
       - "aicalendarapp.xcodeproj/**"
+      - "Package.swift"
       - "Package.resolved"
+      - "aicalendarapp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - "scripts/ci_ios.sh"
       - ".github/workflows/ios-ci.yml"
   push:
@@ -19,7 +21,9 @@ name: iOS CI
       - "iOSAppTests/**"
       - "iOSAppUITests/**"
       - "aicalendarapp.xcodeproj/**"
+      - "Package.swift"
       - "Package.resolved"
+      - "aicalendarapp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
       - "scripts/ci_ios.sh"
       - ".github/workflows/ios-ci.yml"
 

@@ -48,6 +48,8 @@ Firebase Cloud Functions are the main backend boundary for AI work, imports, sub
 
 Firestore and Storage rules live in `backend/firestore/` and `backend/storage/`. Deployment runbooks and live service setup notes are intentionally not included in the public tree.
 
+Public-safe beta setup and verification guidance lives in `docs/beta-readiness.md`.
+
 ## Safety
 
 Do not commit real service config, API keys, environment files, local logs, build outputs, `node_modules`, or generated Firebase function output. The repo `.gitignore` is set up to keep those local.
