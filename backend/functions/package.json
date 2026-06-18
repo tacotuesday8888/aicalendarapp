@@ -29,7 +29,7 @@
     "firebase": "^12.14.0",
     "firebase-tools": "^15.20.0",
     "genkit-cli": "^1.34.0",
-    "tsx": "^4.22.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.8.2"
   }
 }
