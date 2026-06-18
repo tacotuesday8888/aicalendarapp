@@ -28,7 +28,7 @@
     "@firebase/rules-unit-testing": "^5.0.1",
     "firebase": "^12.14.0",
     "firebase-tools": "^15.20.0",
-    "genkit-cli": "^1.34.0",
+    "genkit-cli": "^1.37.0",
     "tsx": "^4.22.0",
     "typescript": "^5.8.2"
   }
