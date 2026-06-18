@@ -53,7 +53,6 @@ actor LinkedSubscriptionIdentityStore {
 
 final class SubscriptionService: SubscriptionServicing {
     static let shared = SubscriptionService()
-    private static let revenueCatEntitlementID = "aiefficiencyapp Pro"
 
     var analyticsService: AnalyticsServicing?
     var backendFunctionService: BackendFunctionServicing?
@@ -112,12 +111,15 @@ final class SubscriptionService: SubscriptionServicing {
             localState: mapped
         )
         await store.set(resolved, for: userID)
+        await syncSuperwallSubscriptionStatus(resolved)
         return resolved
         #else
         if let backendState = await syncBackendSubscriptionStatus(for: userID) {
             await store.set(backendState, for: userID)
+            await syncSuperwallSubscriptionStatus(backendState)
             return backendState
         }
+        await syncSuperwallSubscriptionStatus(previousState)
         return previousState
         #endif
     }
@@ -143,6 +145,7 @@ final class SubscriptionService: SubscriptionServicing {
         )
         analyticsService?.track(event: "subscription_purchased", parameters: ["plan": plan.rawValue])
         await store.set(state, for: userID)
+        await syncSuperwallSubscriptionStatus(state)
         return state
         #else
         throw AppError.integrationUnavailable("RevenueCat")
@@ -161,6 +164,7 @@ final class SubscriptionService: SubscriptionServicing {
             localState: mapped
         )
         await store.set(state, for: userID)
+        await syncSuperwallSubscriptionStatus(state)
         return state
         #else
         throw AppError.integrationUnavailable("RevenueCat")
@@ -174,10 +178,12 @@ final class SubscriptionService: SubscriptionServicing {
         #if canImport(RevenueCat)
         guard Purchases.isConfigured else {
             logger.notice("linkUser called before RevenueCat was configured; skipping.")
+            identifySuperwallUser(userID)
             return
         }
         do {
             let result = try await Purchases.shared.logIn(userID)
+            identifySuperwallUser(userID)
             analyticsService?.track(event: "subscription_user_linked", parameters: [
                 "created": result.created
             ])
@@ -192,13 +198,19 @@ final class SubscriptionService: SubscriptionServicing {
         guard wasLinked else { return }
 
         #if canImport(RevenueCat)
-        guard Purchases.isConfigured else { return }
+        guard Purchases.isConfigured else {
+            resetSuperwallUser()
+            return
+        }
         do {
             _ = try await Purchases.shared.logOut()
+            resetSuperwallUser()
             analyticsService?.track(event: "subscription_user_unlinked")
         } catch {
             analyticsService?.record(error: error, context: "subscription_unlink_user")
         }
+        #else
+        resetSuperwallUser()
         #endif
     }
 
@@ -224,6 +236,10 @@ final class SubscriptionService: SubscriptionServicing {
     }
 
     #if canImport(RevenueCat)
+    private var revenueCatEntitlementID: String {
+        AppConfiguration.shared.revenueCatEntitlementID
+    }
+
     private func ensureRevenueCatConfigured() throws {
         guard Purchases.isConfigured else {
             throw AppError.integrationUnavailable("RevenueCat")
@@ -293,7 +309,7 @@ final class SubscriptionService: SubscriptionServicing {
         currentOffering: RevenueCat.Offering?,
         fallbackPlan: SubscriptionPlan
     ) -> SubscriptionState {
-        let entitlement = customerInfo.entitlements[Self.revenueCatEntitlementID]
+        let entitlement = customerInfo.entitlements[revenueCatEntitlementID]
         let isActive = entitlement?.isActive == true
 
         let activePlan: SubscriptionPlan
@@ -406,6 +422,44 @@ final class SubscriptionService: SubscriptionServicing {
         }
     }
     #endif
+
+    private func identifySuperwallUser(_ userID: String) {
+        #if canImport(SuperwallKit)
+        guard !AppConfiguration.shared.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        Superwall.shared.identify(userId: userID)
+        Superwall.shared.setUserAttributes([
+            "firebase_uid": userID,
+            "revenuecat_app_user_id": userID
+        ])
+        #endif
+    }
+
+    private func resetSuperwallUser() {
+        #if canImport(SuperwallKit)
+        guard !AppConfiguration.shared.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        Superwall.shared.subscriptionStatus = .inactive
+        Superwall.shared.reset()
+        #endif
+    }
+
+    private func syncSuperwallSubscriptionStatus(_ state: SubscriptionState) async {
+        #if canImport(SuperwallKit)
+        guard !AppConfiguration.shared.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        let entitlementID = AppConfiguration.shared.revenueCatEntitlementID
+        await MainActor.run {
+            Superwall.shared.subscriptionStatus = state.entitlement == .active
+                ? .active([Entitlement(id: entitlementID)])
+                : .inactive
+        }
+        #endif
+    }
 }
 
 final class PaywallService: PaywallServicing {

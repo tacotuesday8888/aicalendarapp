@@ -149,6 +149,12 @@ async function confirmDraftArtifact(userID: string, request: AssistantDraftCommi
     throw new HttpsError("not-found", "Draft artifact was not found.");
   }
 
+  if (snapshot.get("status") !== "pending") {
+    throw new HttpsError("failed-precondition", "Draft artifact has already been handled.");
+  }
+
+  const storedAction = assistantDraftRecordFromData(request.action.id, snapshot.data());
+
   await draftRef.set(
     {
       status: "confirmed",
@@ -157,26 +163,56 @@ async function confirmDraftArtifact(userID: string, request: AssistantDraftCommi
     { merge: true }
   );
 
-  await applyDraftAction(userID, request);
-  await updateAssistantThreadAfterCommit(userID, request);
+  await applyDraftAction(userID, storedAction);
+  await updateAssistantThreadAfterCommit(userID, storedAction);
 }
 
-async function applyDraftAction(userID: string, request: AssistantDraftCommitRequest) {
-  switch (request.action.kind) {
+function assistantDraftRecordFromData(id: string, data: unknown): AssistantDraftRecord {
+  const record = recordValue(data);
+  const kind = assistantDraftKindFromValue(record.kind);
+  const title = stringValue(record.title);
+  const detail = stringValue(record.detail);
+
+  if (!kind || !title || !detail) {
+    throw new HttpsError("failed-precondition", "Draft artifact is incomplete.");
+  }
+
+  return {
+    id,
+    kind,
+    title,
+    detail
+  };
+}
+
+function assistantDraftKindFromValue(value: unknown): AssistantDraftRecord["kind"] | null {
+  switch (value) {
+    case "goalPlan":
+    case "plannerAdjustment":
+    case "sessionEvaluation":
+    case "checkInSummary":
+      return value;
+    default:
+      return null;
+  }
+}
+
+async function applyDraftAction(userID: string, action: AssistantDraftRecord) {
+  switch (action.kind) {
     case "goalPlan": {
-      const draftRef = userScopedCollection(userID, "goalPlans").doc(request.action.id);
-      const goalID = await resolveGoalIDForDraftAction(userID, request);
+      const draftRef = userScopedCollection(userID, "goalPlans").doc(action.id);
+      const goalID = await resolveGoalIDForDraftAction(userID, action);
       await draftRef.set(
         {
           id: draftRef.id,
           goalID,
-          summary: request.action.detail,
+          summary: action.detail,
           suggestedTimelineWeeks: 4,
           checkpoints: [],
           nextActions: [
             {
               id: `${draftRef.id}-step-1`,
-              title: request.action.title,
+              title: action.title,
               isComplete: false
             }
           ],
@@ -187,14 +223,14 @@ async function applyDraftAction(userID: string, request: AssistantDraftCommitReq
       break;
     }
     case "plannerAdjustment": {
-      const blockRef = userScopedCollection(userID, "plannerBlocks").doc(request.action.id);
+      const blockRef = userScopedCollection(userID, "plannerBlocks").doc(action.id);
       const startDate = new Date();
       const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
       await blockRef.set(
         {
           id: blockRef.id,
-          title: request.action.title,
-          detail: request.action.detail,
+          title: action.title,
+          detail: action.detail,
           startDate: startDate.toISOString(),
           endDate: endDate.toISOString(),
           type: "studySession",
@@ -214,15 +250,15 @@ async function applyDraftAction(userID: string, request: AssistantDraftCommitReq
   }
 }
 
-async function resolveGoalIDForDraftAction(userID: string, request: AssistantDraftCommitRequest): Promise<string> {
+async function resolveGoalIDForDraftAction(userID: string, action: AssistantDraftRecord): Promise<string> {
   const snapshot = await userScopedCollection(userID, "goals").get();
   const goals = snapshot.docs.map((document) => ({
     id: document.id,
     title: String(document.get("title") ?? "")
   }));
 
-  const normalizedTitle = normalizeLookupString(String(request.action.title ?? ""));
-  const normalizedDetail = normalizeLookupString(String(request.action.detail ?? ""));
+  const normalizedTitle = normalizeLookupString(action.title);
+  const normalizedDetail = normalizeLookupString(action.detail);
 
   const exactMatch = goals.find((goal) => {
     const normalizedGoalTitle = normalizeLookupString(goal.title);
@@ -249,7 +285,7 @@ function normalizeLookupString(value: string): string {
     .trim();
 }
 
-async function updateAssistantThreadAfterCommit(userID: string, request: AssistantDraftCommitRequest) {
+async function updateAssistantThreadAfterCommit(userID: string, action: AssistantDraftRecord) {
   const threadRef = userScopedCollection(userID, "assistantThreads").doc("primary");
   const threadSnapshot = await threadRef.get();
   if (!threadSnapshot.exists) {
@@ -269,7 +305,7 @@ async function updateAssistantThreadAfterCommit(userID: string, request: Assista
     {
       id: `${threadRef.id}-commit-${Date.now()}`,
       role: "assistant",
-      content: `Draft committed: ${request.action.title}`,
+      content: `Draft committed: ${action.title}`,
       createdAt: new Date().toISOString()
     }
   ];
@@ -278,7 +314,7 @@ async function updateAssistantThreadAfterCommit(userID: string, request: Assista
     {
       id: threadData.id ?? threadRef.id,
       messages: updatedMessages,
-      pendingDrafts: pendingDrafts.filter((draft) => draft.id !== request.action.id),
+      pendingDrafts: pendingDrafts.filter((draft) => draft.id !== action.id),
       updatedAt: serverTimestamp()
     },
     { merge: true }

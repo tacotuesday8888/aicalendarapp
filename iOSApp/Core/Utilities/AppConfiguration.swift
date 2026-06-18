@@ -8,6 +8,7 @@ struct AppConfiguration: Sendable {
     let apiBaseURL: URL?
     let aiAPIBaseURL: URL?
     let revenueCatAPIKey: String
+    let revenueCatEntitlementID: String
     let superwallAPIKey: String
     let googleClientID: String
     let googleReversedClientID: String
@@ -18,6 +19,12 @@ struct AppConfiguration: Sendable {
         bundleID = bundle.bundleIdentifier ?? "com.langqi.aicalendarapp"
         appScheme = bundle.object(forInfoDictionaryKey: "AppURLScheme") as? String ?? "aicalendarapp"
         revenueCatAPIKey = bundle.object(forInfoDictionaryKey: "RevenueCatAPIKey") as? String ?? ""
+        let configuredRevenueCatEntitlementID =
+            (bundle.object(forInfoDictionaryKey: "RevenueCatEntitlementID") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        revenueCatEntitlementID = configuredRevenueCatEntitlementID.isEmpty
+            ? "aiefficiencyapp Pro"
+            : configuredRevenueCatEntitlementID
         superwallAPIKey = bundle.object(forInfoDictionaryKey: "SuperwallAPIKey") as? String ?? ""
         googleClientID = bundle.object(forInfoDictionaryKey: "GoogleClientID") as? String ?? ""
         googleReversedClientID = bundle.object(forInfoDictionaryKey: "GoogleReversedClientID") as? String ?? ""

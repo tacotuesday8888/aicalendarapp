@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 
 import {
+  getAIModelName,
+  getAIProviderMode,
+  getAIVertexLocation,
+  isAIStubFallbackEnabled
+} from "../src/ai/config.js";
+import {
   assistantChatFlow,
   goalPlanGenerationFlow,
   syllabusImportFlow,
@@ -31,13 +37,17 @@ import {
 } from "../src/ai/usagePolicy.js";
 import { needsCrisisSafetyResponse, reviewVibeFeedbackForCrisis } from "../src/ai/safety.js";
 import {
+  configuredRevenueCatEntitlementIDs,
   deriveBetaProSnapshot,
+  deriveSnapshotFromEvent,
+  deriveSnapshotFromSubscriberResponse,
   subscriptionSyncResponse
 } from "../src/billing/revenuecat.js";
 
 process.env.AI_PROVIDER = "stub";
 
 async function runSmokeTest() {
+  assertAIConfigDefaults();
   assertPromptContracts();
   assertUsagePolicy();
   assertSubscriptionSyncContract();
@@ -173,7 +183,125 @@ async function runSmokeTest() {
   console.log("AI smoke test passed.");
 }
 
+function assertAIConfigDefaults() {
+  const previousProvider = process.env.AI_PROVIDER;
+  const previousModel = process.env.AI_MODEL;
+  const previousLocation = process.env.AI_VERTEX_LOCATION;
+  const previousCloudLocation = process.env.GCLOUD_LOCATION;
+  const previousStubFallback = process.env.AI_ENABLE_STUB_FALLBACK;
+  const previousKService = process.env.K_SERVICE;
+  const previousFunctionTarget = process.env.FUNCTION_TARGET;
+  const previousFunctionSignatureType = process.env.FUNCTION_SIGNATURE_TYPE;
+  const previousFunctionsEmulator = process.env.FUNCTIONS_EMULATOR;
+  const previousCI = process.env.CI;
+
+  try {
+    delete process.env.AI_PROVIDER;
+    delete process.env.AI_MODEL;
+    delete process.env.AI_VERTEX_LOCATION;
+    delete process.env.GCLOUD_LOCATION;
+    delete process.env.AI_ENABLE_STUB_FALLBACK;
+    delete process.env.K_SERVICE;
+    delete process.env.FUNCTION_TARGET;
+    delete process.env.FUNCTION_SIGNATURE_TYPE;
+    delete process.env.FUNCTIONS_EMULATOR;
+    delete process.env.CI;
+
+    assert.equal(getAIProviderMode(), "stub");
+    assert.equal(getAIModelName(), "gemini-3.1-flash-lite");
+    assert.equal(getAIVertexLocation(), "global");
+    assert.equal(isAIStubFallbackEnabled(), false);
+
+    process.env.K_SERVICE = "ai";
+    assert.throws(
+      () => getAIProviderMode(),
+      /AI_PROVIDER is required in managed Firebase runtimes/
+    );
+    process.env.FUNCTIONS_EMULATOR = "true";
+    assert.equal(getAIProviderMode(), "stub");
+    delete process.env.K_SERVICE;
+    delete process.env.FUNCTIONS_EMULATOR;
+
+    process.env.AI_PROVIDER = "not-a-provider";
+    assert.throws(
+      () => getAIProviderMode(),
+      /Unsupported AI_PROVIDER/
+    );
+
+    process.env.AI_PROVIDER = "vertex";
+    process.env.AI_MODEL = "custom-model";
+    process.env.AI_VERTEX_LOCATION = "us";
+    process.env.AI_ENABLE_STUB_FALLBACK = "true";
+
+    assert.equal(getAIProviderMode(), "vertex");
+    assert.equal(getAIModelName(), "custom-model");
+    assert.equal(getAIVertexLocation(), "us");
+    assert.equal(isAIStubFallbackEnabled(), true);
+  } finally {
+    restoreEnvValue("AI_PROVIDER", previousProvider);
+    restoreEnvValue("AI_MODEL", previousModel);
+    restoreEnvValue("AI_VERTEX_LOCATION", previousLocation);
+    restoreEnvValue("GCLOUD_LOCATION", previousCloudLocation);
+    restoreEnvValue("AI_ENABLE_STUB_FALLBACK", previousStubFallback);
+    restoreEnvValue("K_SERVICE", previousKService);
+    restoreEnvValue("FUNCTION_TARGET", previousFunctionTarget);
+    restoreEnvValue("FUNCTION_SIGNATURE_TYPE", previousFunctionSignatureType);
+    restoreEnvValue("FUNCTIONS_EMULATOR", previousFunctionsEmulator);
+    restoreEnvValue("CI", previousCI);
+  }
+}
+
 function assertSubscriptionSyncContract() {
+  const previousRevenueCatEntitlementID = process.env.REVENUECAT_ENTITLEMENT_ID;
+
+  try {
+    delete process.env.REVENUECAT_ENTITLEMENT_ID;
+    assert.deepEqual(configuredRevenueCatEntitlementIDs(), ["aiefficiencyapp Pro"]);
+
+    process.env.REVENUECAT_ENTITLEMENT_ID = "pro, beta";
+    assert.deepEqual(configuredRevenueCatEntitlementIDs(), ["pro", "beta"]);
+
+    const unrelatedWebhookSnapshot = deriveSnapshotFromEvent({
+      type: "INITIAL_PURCHASE",
+      entitlement_ids: ["unrelated"],
+      product_id: "monthly",
+      expiration_at_ms: null,
+      event_timestamp_ms: Date.parse("2026-04-26T12:00:00.000Z")
+    });
+    assert.equal(unrelatedWebhookSnapshot.entitlement, "inactive");
+    assert.deepEqual(unrelatedWebhookSnapshot.entitlementIDs, []);
+
+    const matchingWebhookSnapshot = deriveSnapshotFromEvent({
+      type: "INITIAL_PURCHASE",
+      entitlement_ids: ["pro"],
+      product_id: "monthly",
+      expiration_at_ms: Date.parse("2026-05-26T12:00:00.000Z"),
+      event_timestamp_ms: Date.parse("2026-04-26T12:00:00.000Z")
+    });
+    assert.equal(matchingWebhookSnapshot.entitlement, "active");
+    assert.deepEqual(matchingWebhookSnapshot.entitlementIDs, ["pro"]);
+
+    const subscriberSnapshot = deriveSnapshotFromSubscriberResponse({
+      subscriber: {
+        entitlements: {
+          unrelated: {
+            expires_date: "2999-01-01T00:00:00.000Z",
+            product_identifier: "unrelated_monthly"
+          },
+          pro: {
+            expires_date: "2999-01-01T00:00:00.000Z",
+            product_identifier: "pro_annual"
+          }
+        }
+      }
+    });
+    assert.equal(subscriberSnapshot.entitlement, "active");
+    assert.deepEqual(subscriberSnapshot.entitlementIDs, ["pro"]);
+    assert.equal(subscriberSnapshot.activePlan, "pro_annual");
+  } finally {
+    restoreEnvValue("REVENUECAT_ENTITLEMENT_ID", previousRevenueCatEntitlementID);
+  }
+
   const betaSnapshot = deriveBetaProSnapshot("beta-uid", { BETA_PRO_USER_IDS: "beta-uid, other-uid" });
   assert.ok(betaSnapshot);
   assert.equal(betaSnapshot.entitlement, "active");
@@ -276,6 +404,14 @@ function assertPromptContracts() {
     assert.ok(prompt.includes("Purpose:"), `${featureName} prompt must define purpose.`);
     assert.ok(prompt.includes("Allowed scope:"), `${featureName} prompt must define allowed scope.`);
     assert.ok(prompt.includes("Output format"), `${featureName} prompt must define output expectations.`);
+  }
+}
+
+function restoreEnvValue(key: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
   }
 }
 
