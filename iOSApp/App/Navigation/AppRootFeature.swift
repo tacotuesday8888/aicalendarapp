@@ -137,6 +137,7 @@ final class AppSessionViewModel: ObservableObject {
                     subscriptionTask?.cancel()
                     subscriptionTask = nil
                     await container.subscriptionService.unlinkUser()
+                    await cancelReminderNotificationsForSignedOutUser()
                     continue
                 }
 
@@ -190,6 +191,13 @@ final class AppSessionViewModel: ObservableObject {
             }
         } catch {
             container.analyticsService.record(error: error, context: "notification_reminder_sync")
+        }
+    }
+
+    private func cancelReminderNotificationsForSignedOutUser() async {
+        let cancelledCount = await container.notificationService.cancelReminderNotifications()
+        if cancelledCount > 0 {
+            container.analyticsService.track(event: "notification_reminders_cancelled", parameters: ["count": cancelledCount])
         }
     }
 }

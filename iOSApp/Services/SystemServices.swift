@@ -140,6 +140,24 @@ final class NotificationService: NotificationServicing {
         return enabledRules.count
     }
 
+    func cancelReminderNotifications() async -> Int {
+        let pendingRequests = await pendingNotificationRequests()
+        let reminderIDs = pendingRequests.compactMap { request -> String? in
+            Self.shouldRemovePendingReminderRequest(
+                identifier: request.identifier,
+                userInfo: request.content.userInfo,
+                body: request.content.body,
+                currentRuleIDs: []
+            ) ? request.identifier : nil
+        }
+
+        if !reminderIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: reminderIDs)
+        }
+
+        return reminderIDs.count
+    }
+
     static func shouldRemovePendingReminderRequest(
         identifier: String,
         userInfo: [AnyHashable: Any],
