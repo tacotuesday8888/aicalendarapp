@@ -104,7 +104,15 @@ npm --prefix backend/functions run audit:production
 ```
 
 This audit is currently expected to exit nonzero because it reports upstream Genkit/Firebase transitive OpenTelemetry and `uuid` advisories. Treat it as a tracked release-risk review, not a merge-blocking local verification check, until a compatible upstream fix or tested targeted override is available. Do not force `npm audit fix --force` without first confirming Firebase Functions and Genkit peer compatibility.
-As of June 18, 2026, the audit path is transitive through `genkit`, `@genkit-ai/google-genai`, `firebase-admin`, `firebase-functions`, OpenTelemetry packages, and nested `uuid` versions. `npm audit fix --force` proposes an unsafe breaking downgrade path, so this is tracked as upstream dependency risk until compatible Firebase/Genkit releases or tested targeted overrides are available.
+
+As of June 19, 2026, the open Dependabot alerts are:
+
+- `@opentelemetry/auto-instrumentations-node` high severity, fixed upstream at `0.75.0`.
+- `@opentelemetry/sdk-node` high severity, fixed upstream at `0.217.0`.
+- `@opentelemetry/core` medium severity, fixed upstream at `2.8.0`.
+- `uuid` medium severity, fixed upstream at `11.1.1`.
+
+Dependabot cannot currently produce safe PRs for these alerts. The `uuid` alert is constrained by the current Genkit/Firebase dependency tree, and the OpenTelemetry fix path would downgrade `@genkit-ai/google-genai` from `1.37.0` to `1.16.1`. A Dependabot PR for `firebase-admin@14.0.0` was also closed because `firebase-functions@7.2.5` only accepts `firebase-admin` `^11.10.0 || ^12.0.0 || ^13.0.0`. Keep these as monitored upstream dependency risks until compatible Firebase/Genkit releases are available or a targeted override has been tested through backend CI, rules tests, and live smoke.
 
 Live smoke tests need a deployed Functions base URL, disposable Firebase ID token, optional App Check token, and a disposable test user:
 
@@ -154,6 +162,16 @@ This intentionally creates AI usage records plus assistant, goal-plan, and sylla
 - Real Firebase project configuration and deployed Functions secrets.
 - RevenueCat products, entitlement, offering, API keys, and webhook secret.
 - Superwall project, API key, placements, and paywall configuration.
-- GitHub branch protection and CodeQL/CI results after the first public workflow run.
+- App Check signed-build validation and Firebase product-level enforcement rollout.
+- APNS key/certificate setup and signed push-notification testing.
+- Upstream dependency fixes for the currently unresolved Genkit/Firebase transitive OpenTelemetry and `uuid` advisories.
 - Existing public Git history includes older private planning/runbook documents that are no longer present in the current tree. The current tree is public-safe, but removing historical docs requires an explicit approved history rewrite or a fresh snapshot repository.
 - Designer UI handoff for final visual polish.
+
+## Completed Repository Readiness Items
+
+- Repository visibility is public and GitHub Actions are enabled.
+- Branch protection is enabled on `main`.
+- CodeQL and backend/iOS CI workflows have passed on public PRs and merged `main`.
+- Dependabot update schedules are configured for GitHub Actions, backend npm dependencies, and Swift Package Manager.
+- Current tracked tree secret scan has no known credential matches; real local config files remain ignored and untracked.
