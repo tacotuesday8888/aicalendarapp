@@ -28,6 +28,6 @@
     "@firebase/rules-unit-testing": "^5.0.1",
     "firebase": "^12.15.0",
     "tsx": "^4.22.4",
-    "typescript": "^5.8.2"
+    "typescript": "^6.0.3"
   }
 }
