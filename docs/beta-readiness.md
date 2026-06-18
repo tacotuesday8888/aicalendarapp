@@ -131,7 +131,7 @@ BETA_PRO_USER_IDS=<same disposable Firebase UID as SMOKE_USER_ID>
 
 If using a real RevenueCat sandbox/test entitlement instead, `BETA_PRO_USER_IDS` can be omitted, but the disposable user must sync as `entitlement=active` before the AI calls run.
 
-This intentionally creates AI usage records plus assistant, goal-plan, and syllabus-import review draft documents for the disposable user, then verifies those documents through `exportUserData`. The script expects new premium AI usage records with `provider=vertex` and `model=gemini-3.1-flash-lite`; override those checks only when deliberately smoke-testing a different model with `SMOKE_EXPECTED_AI_PROVIDER` and `SMOKE_EXPECTED_AI_MODEL`. If it fails with a premium or permission error, confirm the ID token belongs to `SMOKE_USER_ID`, the user has an active RevenueCat entitlement or is listed in `BETA_PRO_USER_IDS`, and App Check is still in monitor mode or the provided token is valid.
+This intentionally creates AI usage records plus assistant, goal-plan, and syllabus-import review draft documents for the disposable user, commits the generated syllabus import, and verifies the resulting course and assignment records through `exportUserData`. The script expects new premium AI usage records with `provider=vertex` and `model=gemini-3.1-flash-lite`; override those checks only when deliberately smoke-testing a different model with `SMOKE_EXPECTED_AI_PROVIDER` and `SMOKE_EXPECTED_AI_MODEL`. If it fails with a premium or permission error, confirm the ID token belongs to `SMOKE_USER_ID`, the user has an active RevenueCat entitlement or is listed in `BETA_PRO_USER_IDS`, and App Check is still in monitor mode or the provided token is valid.
 
 ## Remaining External Blockers
 
