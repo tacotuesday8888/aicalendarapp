@@ -129,6 +129,7 @@ protocol DatabaseServicing: AnyObject, Sendable {
     nonisolated func fetchAll<T: Codable>(_ type: T.Type, from collection: AppCollection, userID: String?) async throws -> [T]
     nonisolated func delete(from collection: AppCollection, id: String, userID: String?) async throws
     nonisolated func observeAll<T: Codable>(_ type: T.Type, from collection: AppCollection, userID: String?) -> AsyncThrowingStream<[T], Error>
+    nonisolated func deleteLocalData(for userID: String) async
 }
 
 protocol StorageServicing: AnyObject {

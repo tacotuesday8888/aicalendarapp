@@ -29,6 +29,7 @@ final class SettingsViewModel: ObservableObject {
     private let notificationService: NotificationServicing
     private let subscriptionService: SubscriptionServicing
     private let backendFunctionService: BackendFunctionServicing
+    private let databaseService: DatabaseServicing
     private let analyticsService: AnalyticsServicing
 
     init(
@@ -39,6 +40,7 @@ final class SettingsViewModel: ObservableObject {
         notificationService: NotificationServicing,
         subscriptionService: SubscriptionServicing,
         backendFunctionService: BackendFunctionServicing,
+        databaseService: DatabaseServicing,
         analyticsService: AnalyticsServicing
     ) {
         self.profile = user
@@ -49,6 +51,7 @@ final class SettingsViewModel: ObservableObject {
         self.notificationService = notificationService
         self.subscriptionService = subscriptionService
         self.backendFunctionService = backendFunctionService
+        self.databaseService = databaseService
         self.analyticsService = analyticsService
     }
 
@@ -203,6 +206,7 @@ final class SettingsViewModel: ObservableObject {
 
         do {
             try await backendFunctionService.deleteUserAccount(UserJobRequestPayload(userID: profile.id))
+            await databaseService.deleteLocalData(for: profile.id)
             try await authService.signOut()
             let cancelledCount = await notificationService.cancelReminderNotifications()
             if cancelledCount > 0 {
@@ -270,6 +274,7 @@ struct SettingsView: View {
             notificationService: container.notificationService,
             subscriptionService: container.subscriptionService,
             backendFunctionService: container.backendFunctionService,
+            databaseService: container.databaseService,
             analyticsService: container.analyticsService
         ))
     }
