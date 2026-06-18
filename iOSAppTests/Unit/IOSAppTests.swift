@@ -1736,6 +1736,78 @@ struct IOSAppTests {
         #expect(state.isComplete)
     }
 
+    @Test func onboardingCompletionRejectsWhitespaceOnlyProfile() async {
+        var profile = testProfile(id: uniqueUserID("onboarding-whitespace"))
+        profile.displayName = "   "
+        profile.academicFocus = ""
+        let userService = TestUserService(profile: profile)
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService
+        )
+        let sessionViewModel = AppSessionViewModel(container: container)
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: TestCalendarSyncService(),
+            syllabusImportService: SyllabusImportService.shared,
+            analyticsService: analyticsService,
+            notificationService: TestNotificationService()
+        )
+
+        viewModel.focusArea = " \n\t "
+        await viewModel.complete(using: sessionViewModel)
+
+        #expect(!viewModel.state.isComplete)
+        #expect(viewModel.errorMessage == "Add an academic focus before continuing.")
+        #expect(userService.savedProfiles.isEmpty)
+        #expect(!userService.onboardingState.isComplete)
+        #expect(!analyticsService.events.contains("onboarding_completed"))
+        #expect(!viewModel.isLoading)
+    }
+
+    @Test func onboardingCompletionTrimsProfileBeforePersisting() async throws {
+        var profile = testProfile(id: uniqueUserID("onboarding-trim"))
+        profile.displayName = "  Riley  "
+        profile.academicFocus = ""
+        let userService = TestUserService(profile: profile)
+        let subscriptionService = TestSubscriptionService()
+        subscriptionService.state = .unlocked
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: subscriptionService,
+            analyticsService: analyticsService
+        )
+        let sessionViewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where sessionViewModel.currentUser == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: TestCalendarSyncService(),
+            syllabusImportService: SyllabusImportService.shared,
+            analyticsService: analyticsService,
+            notificationService: TestNotificationService()
+        )
+
+        viewModel.focusArea = "  Computer Science  "
+        await viewModel.complete(using: sessionViewModel)
+
+        let savedProfile = try #require(userService.savedProfiles.last)
+        #expect(savedProfile.displayName == "Riley")
+        #expect(savedProfile.academicFocus == "Computer Science")
+        #expect(userService.onboardingState.isComplete)
+        #expect(sessionViewModel.onboardingState.isComplete)
+        #expect(viewModel.state.isComplete)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.events.contains("onboarding_completed"))
+        #expect(!viewModel.isLoading)
+    }
+
     @Test func assistantDraftCommitRequiresLiveBackend() async throws {
         let database = TestDatabaseService()
         let service = BackendFunctionService()
