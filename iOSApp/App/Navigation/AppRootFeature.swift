@@ -8,6 +8,8 @@ final class AppSessionViewModel: ObservableObject {
     @Published private(set) var subscriptionState = SubscriptionState.locked
     @Published private(set) var subscriptionRefreshError: String?
     @Published private(set) var isRefreshingSubscription = false
+    @Published private(set) var userContextLoadError: String?
+    @Published private(set) var isLoadingUserContext = false
     @Published private(set) var calendarRefreshError: String?
     @Published private(set) var isRefreshingCalendarImport = false
     @Published var pendingRoute: AppRoute?
@@ -58,7 +60,9 @@ final class AppSessionViewModel: ObservableObject {
         do {
             try await container.userService.saveProfile(profile)
             try await container.userService.saveOnboardingState(onboarding, for: profile.id)
+            authState = .loaded(profile)
             onboardingState = onboarding
+            userContextLoadError = nil
             if onboarding.isComplete {
                 await syncReminderRulesIfNeeded(onboarding.reminderRules)
             }
@@ -110,6 +114,11 @@ final class AppSessionViewModel: ObservableObject {
         }
     }
 
+    func retryUserContextLoad() async {
+        guard let profile = currentUser else { return }
+        await loadUserContext(for: profile)
+    }
+
     private func observeAuth() {
         tasks.forEach { $0.cancel() }
         tasks.removeAll()
@@ -123,12 +132,18 @@ final class AppSessionViewModel: ObservableObject {
                 guard let profile else {
                     onboardingState = OnboardingState()
                     subscriptionState = .locked
+                    userContextLoadError = nil
+                    isLoadingUserContext = false
                     subscriptionTask?.cancel()
                     subscriptionTask = nil
                     await container.subscriptionService.unlinkUser()
                     continue
                 }
 
+                isLoadingUserContext = true
+                userContextLoadError = nil
+                onboardingState = OnboardingState()
+                subscriptionState = .locked
                 await container.subscriptionService.linkUser(profile.id)
                 await loadUserContext(for: profile)
             }
@@ -138,6 +153,9 @@ final class AppSessionViewModel: ObservableObject {
     }
 
     private func loadUserContext(for profile: UserProfile) async {
+        isLoadingUserContext = true
+        defer { isLoadingUserContext = false }
+        userContextLoadError = nil
         onboardingState = OnboardingState()
         subscriptionState = .locked
         observeSubscription(for: profile.id)
@@ -149,9 +167,9 @@ final class AppSessionViewModel: ObservableObject {
             }
             await refreshSubscription()
         } catch {
-            onboardingState = OnboardingState()
             subscriptionState = .locked
             container.analyticsService.record(error: error, context: "load_user_context")
+            userContextLoadError = AppError.wrap(error, fallback: "Unable to load your planner.").errorDescription
         }
     }
 
@@ -193,7 +211,24 @@ struct AppRootView: View {
                     .swGlassScreenBackground()
             case .loaded(let profile):
                 if let profile {
-                    if !viewModel.onboardingState.isComplete {
+                    if viewModel.isLoadingUserContext {
+                        ProgressView("Loading your planner…")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .swGlassScreenBackground()
+                    } else if let userContextLoadError = viewModel.userContextLoadError {
+                        ContentUnavailableView {
+                            Label("Unable to load planner", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text(userContextLoadError)
+                        } actions: {
+                            Button("Retry") {
+                                Task { await viewModel.retryUserContextLoad() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .swGlassScreenBackground()
+                    } else if !viewModel.onboardingState.isComplete {
                         OnboardingView(
                             viewModel: OnboardingViewModel(
                                 user: profile,

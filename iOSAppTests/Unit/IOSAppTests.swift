@@ -119,6 +119,36 @@ private final class TestAnalyticsService: AnalyticsServicing {
     }
 }
 
+private final class TestURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let requestHandler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: AppError.unknown("Missing test request handler."))
+            return
+        }
+
+        do {
+            let (response, data) = try requestHandler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
 private final class TestPlannerService: PlannerServicing {
     var snapshot = PlannerSnapshot.empty
     private(set) var savedBlocks = [PlannerBlock]()
@@ -241,6 +271,8 @@ private final class TestAuthService: AuthServicing {
 private final class TestUserService: UserServicing {
     var profile: UserProfile
     var onboardingState = OnboardingState()
+    var fetchOnboardingError: Error?
+    var saveProfileError: Error?
     private(set) var savedProfiles = [UserProfile]()
 
     init(profile: UserProfile) {
@@ -252,12 +284,18 @@ private final class TestUserService: UserServicing {
     }
 
     func saveProfile(_ profile: UserProfile) async throws {
+        if let saveProfileError {
+            throw saveProfileError
+        }
         savedProfiles.append(profile)
         self.profile = profile
     }
 
     func fetchOnboardingState(for userID: String) async throws -> OnboardingState {
-        onboardingState
+        if let fetchOnboardingError {
+            throw fetchOnboardingError
+        }
+        return onboardingState
     }
 
     func saveOnboardingState(_ state: OnboardingState, for userID: String) async throws {
@@ -589,6 +627,41 @@ struct IOSAppTests {
 
         #expect(abs(fractionalPayload.createdAt.timeIntervalSince1970 - 1_777_242_818.123) < 0.001)
         #expect(plainPayload.createdAt.timeIntervalSince1970 == 1_777_242_818)
+    }
+
+    @Test func networkServiceContinuesWhenAppCheckTokenProviderFails() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let requestURL = URL(string: "https://example.invalid/functions/ping")!
+        let responseData = #"{"success":true}"#.data(using: .utf8)!
+        TestURLProtocol.requestHandler = { request in
+            #expect(request.url == requestURL)
+            #expect(request.value(forHTTPHeaderField: "X-Firebase-AppCheck") == nil)
+            return (
+                HTTPURLResponse(url: requestURL, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                responseData
+            )
+        }
+        defer { TestURLProtocol.requestHandler = nil }
+
+        struct PingResponse: Decodable {
+            let success: Bool
+        }
+
+        let service = NetworkService(
+            session: session,
+            appCheckTokenProvider: {
+                throw AppError.network(description: "Debug App Check token unavailable.")
+            }
+        )
+
+        let response = try await service.request(
+            APIEndpoint(path: "ping", baseURL: URL(string: "https://example.invalid/functions")!, retryCount: 0),
+            decode: PingResponse.self
+        )
+
+        #expect(response.success)
     }
 
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
@@ -1347,6 +1420,30 @@ struct IOSAppTests {
         #expect(notificationService.scheduledRules.isEmpty)
     }
 
+    @Test func appSessionShowsRetryableUserContextErrorInsteadOfCompletingOnboardingOnLoadFailure() async throws {
+        let profile = testProfile(id: uniqueUserID("session-context-failure"))
+        let userService = TestUserService(profile: profile)
+        userService.fetchOnboardingError = AppError.network(description: "Temporary backend outage.")
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService
+        )
+
+        let viewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where viewModel.userContextLoadError == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(viewModel.currentUser?.id == profile.id)
+        #expect(!viewModel.onboardingState.isComplete)
+        #expect(viewModel.userContextLoadError == "Temporary backend outage.")
+        #expect(!viewModel.isLoadingUserContext)
+        #expect(analyticsService.errors.contains("load_user_context"))
+    }
+
     @Test func appSessionRefreshesSelectedCalendarImportsFromLatestProfile() async throws {
         var initialProfile = testProfile(id: uniqueUserID("session-calendar-refresh"))
         initialProfile.selectedCalendarIDs = []
@@ -1644,9 +1741,95 @@ struct IOSAppTests {
 
         await viewModel.syncCalendars()
 
+        #expect(userService.savedProfiles.map(\.selectedCalendarIDs) == [[], ["school"]])
+        #expect(viewModel.profile.selectedCalendarIDs == ["school"])
+        #expect(viewModel.selectedCalendarIDs == ["school"])
+        #expect(calendarSyncService.importedCalendarIDs == [["school"]])
+        #expect(viewModel.statusMessage == "Cleanup failed.")
+    }
+
+    @Test func settingsViewModelDoesNotDisconnectCalendarsWhenSelectionSaveFails() async {
+        var profile = testProfile(id: uniqueUserID("settings-calendar-disconnect-save-failure"))
+        profile.selectedCalendarIDs = ["school"]
+        let calendarSyncService = TestCalendarSyncService()
+        let userService = TestUserService(profile: profile)
+        userService.saveProfileError = AppError.network(description: "Profile save failed.")
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: userService,
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: TestAnalyticsService()
+        )
+        viewModel.selectedCalendarIDs = []
+
+        await viewModel.syncCalendars()
+
+        #expect(calendarSyncService.disconnectedUserIDs.isEmpty)
+        #expect(calendarSyncService.importedCalendarIDs.isEmpty)
         #expect(userService.savedProfiles.isEmpty)
         #expect(viewModel.profile.selectedCalendarIDs == ["school"])
-        #expect(viewModel.statusMessage == "Cleanup failed.")
+        #expect(viewModel.selectedCalendarIDs == ["school"])
+        #expect(viewModel.statusMessage == "Profile save failed.")
+    }
+
+    @Test func settingsViewModelDoesNotPersistCalendarSelectionWhenImportFails() async {
+        var profile = testProfile(id: uniqueUserID("settings-calendar-import-failure"))
+        profile.selectedCalendarIDs = ["school"]
+        let calendarSyncService = TestCalendarSyncService()
+        calendarSyncService.importError = AppError.permissionDenied("calendar access")
+        let userService = TestUserService(profile: profile)
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: userService,
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: TestAnalyticsService()
+        )
+        viewModel.selectedCalendarIDs = ["personal"]
+
+        await viewModel.syncCalendars()
+
+        #expect(calendarSyncService.importedCalendarIDs.isEmpty)
+        #expect(userService.savedProfiles.map(\.selectedCalendarIDs) == [["personal"], ["school"]])
+        #expect(calendarSyncService.disconnectedUserIDs == [profile.id])
+        #expect(viewModel.profile.selectedCalendarIDs == ["school"])
+        #expect(viewModel.selectedCalendarIDs == ["school"])
+        #expect(viewModel.statusMessage == "Permission for calendar access was denied.")
+    }
+
+    @Test func settingsViewModelDoesNotImportCalendarsWhenSelectionSaveFails() async {
+        var profile = testProfile(id: uniqueUserID("settings-calendar-save-failure"))
+        profile.selectedCalendarIDs = ["school"]
+        let calendarSyncService = TestCalendarSyncService()
+        let userService = TestUserService(profile: profile)
+        userService.saveProfileError = AppError.network(description: "Profile save failed.")
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: userService,
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: TestAnalyticsService()
+        )
+        viewModel.selectedCalendarIDs = ["personal"]
+
+        await viewModel.syncCalendars()
+
+        #expect(calendarSyncService.importedCalendarIDs.isEmpty)
+        #expect(calendarSyncService.disconnectedUserIDs.isEmpty)
+        #expect(userService.savedProfiles.isEmpty)
+        #expect(viewModel.profile.selectedCalendarIDs == ["school"])
+        #expect(viewModel.selectedCalendarIDs == ["school"])
+        #expect(viewModel.statusMessage == "Profile save failed.")
     }
 
     @Test func calendarDisconnectDeletesOnlyAppleCalendarPlannerBlocks() async throws {
@@ -1887,6 +2070,7 @@ struct IOSAppTests {
         #expect(savedProfile.academicFocus == "Computer Science")
         #expect(userService.onboardingState.isComplete)
         #expect(sessionViewModel.onboardingState.isComplete)
+        #expect(sessionViewModel.currentUser?.academicFocus == "Computer Science")
         #expect(viewModel.state.isComplete)
         #expect(viewModel.errorMessage == nil)
         #expect(analyticsService.events.contains("onboarding_completed"))

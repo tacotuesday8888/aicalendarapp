@@ -14,11 +14,17 @@ final class NetworkService: NetworkServicing {
 
     private let session: URLSession
     private let configuration: AppConfiguration
+    private let appCheckTokenProvider: (@Sendable () async throws -> String?)?
     private let logger = AppLogger(category: "network")
 
-    init(session: URLSession = .shared, configuration: AppConfiguration = .shared) {
+    init(
+        session: URLSession = .shared,
+        configuration: AppConfiguration = .shared,
+        appCheckTokenProvider: (@Sendable () async throws -> String?)? = nil
+    ) {
         self.session = session
         self.configuration = configuration
+        self.appCheckTokenProvider = appCheckTokenProvider
     }
 
     nonisolated func request<T: Decodable>(_ endpoint: APIEndpoint, decode: T.Type) async throws -> T {
@@ -42,7 +48,7 @@ final class NetworkService: NetworkServicing {
         if let authorizationHeader = try await authorizationHeaderValue(), request.value(forHTTPHeaderField: "Authorization") == nil {
             request.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
         }
-        if let appCheckHeader = try await appCheckHeaderValue(), request.value(forHTTPHeaderField: "X-Firebase-AppCheck") == nil {
+        if let appCheckHeader = await appCheckHeaderValue(), request.value(forHTTPHeaderField: "X-Firebase-AppCheck") == nil {
             request.setValue(appCheckHeader, forHTTPHeaderField: "X-Firebase-AppCheck")
         }
         endpoint.headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
@@ -142,8 +148,20 @@ final class NetworkService: NetworkServicing {
     nonisolated private func authorizationHeaderValue() async throws -> String? { nil }
     #endif
 
+    nonisolated private func appCheckHeaderValue() async -> String? {
+        do {
+            if let appCheckTokenProvider {
+                return try await appCheckTokenProvider()
+            }
+            return try await firebaseAppCheckHeaderValue()
+        } catch {
+            logger.error("App Check token unavailable. Sending request without App Check header so the backend can monitor or enforce policy: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     #if canImport(FirebaseCore) && canImport(FirebaseAppCheck)
-    nonisolated private func appCheckHeaderValue() async throws -> String? {
+    nonisolated private func firebaseAppCheckHeaderValue() async throws -> String? {
         guard FirebaseApp.app() != nil else {
             return nil
         }
@@ -152,6 +170,6 @@ final class NetworkService: NetworkServicing {
         return token.token
     }
     #else
-    nonisolated private func appCheckHeaderValue() async throws -> String? { nil }
+    nonisolated private func firebaseAppCheckHeaderValue() async throws -> String? { nil }
     #endif
 }

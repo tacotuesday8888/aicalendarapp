@@ -113,22 +113,49 @@ final class SettingsViewModel: ObservableObject {
 
         do {
             let selectedIDs = Array(selectedCalendarIDs).sorted()
+            let previousProfile = profile
 
             guard !selectedIDs.isEmpty else {
-                try await calendarSyncService.disconnectCalendars(for: profile.id)
-                profile.selectedCalendarIDs = []
-                try await userService.saveProfile(profile)
-                statusMessage = "Apple Calendar disconnected and imported blocks were removed."
-                analyticsService.track(event: "calendar_sync_disconnected")
+                var updatedProfile = profile
+                updatedProfile.selectedCalendarIDs = []
+                try await userService.saveProfile(updatedProfile)
+                profile = updatedProfile
+                do {
+                    try await calendarSyncService.disconnectCalendars(for: profile.id)
+                    statusMessage = "Apple Calendar disconnected and imported blocks were removed."
+                    analyticsService.track(event: "calendar_sync_disconnected")
+                } catch {
+                    profile = previousProfile
+                    selectedCalendarIDs = Set(previousProfile.selectedCalendarIDs)
+                    try? await userService.saveProfile(previousProfile)
+                    if !previousProfile.selectedCalendarIDs.isEmpty {
+                        _ = try? await calendarSyncService.importSelectedCalendars(previousProfile.selectedCalendarIDs, for: previousProfile.id)
+                    }
+                    throw error
+                }
                 return
             }
 
-            profile.selectedCalendarIDs = selectedIDs
-            try await userService.saveProfile(profile)
-            _ = try await calendarSyncService.importSelectedCalendars(profile.selectedCalendarIDs, for: profile.id)
-            statusMessage = "Calendar import refreshed."
-            analyticsService.track(event: "calendar_sync_imported", parameters: ["count": profile.selectedCalendarIDs.count])
+            var updatedProfile = profile
+            updatedProfile.selectedCalendarIDs = selectedIDs
+            try await userService.saveProfile(updatedProfile)
+            profile = updatedProfile
+            do {
+                _ = try await calendarSyncService.importSelectedCalendars(selectedIDs, for: profile.id)
+                statusMessage = "Calendar import refreshed."
+                analyticsService.track(event: "calendar_sync_imported", parameters: ["count": profile.selectedCalendarIDs.count])
+            } catch {
+                profile = previousProfile
+                selectedCalendarIDs = Set(previousProfile.selectedCalendarIDs)
+                try? await userService.saveProfile(previousProfile)
+                try? await calendarSyncService.disconnectCalendars(for: previousProfile.id)
+                if !previousProfile.selectedCalendarIDs.isEmpty {
+                    _ = try? await calendarSyncService.importSelectedCalendars(previousProfile.selectedCalendarIDs, for: previousProfile.id)
+                }
+                throw error
+            }
         } catch {
+            selectedCalendarIDs = Set(profile.selectedCalendarIDs)
             statusMessage = AppError.wrap(error, fallback: "Unable to refresh calendar import.").errorDescription ?? ""
         }
     }
