@@ -69,6 +69,21 @@ actor MemoryDatabaseStore {
         broadcast(path: path)
     }
 
+    func deletePrefix(pathPrefix: String) {
+        let normalizedPrefix = pathPrefix.hasSuffix("/") ? pathPrefix : "\(pathPrefix)/"
+        let paths = storage.keys.filter { path in
+            path == pathPrefix || path.hasPrefix(normalizedPrefix)
+        }
+
+        for path in paths {
+            storage[path] = nil
+            removeDirectoryFromDisk(path: path)
+            broadcast(path: path)
+        }
+
+        removeDirectoryFromDisk(path: pathPrefix)
+    }
+
     func observe(path: String) -> AsyncStream<[Data]> {
         let token = UUID()
         return AsyncStream { continuation in
@@ -111,6 +126,11 @@ actor MemoryDatabaseStore {
     private func removeFromDisk(path: String, id: String) {
         let file = fileURL(for: path, id: id)
         try? FileManager.default.removeItem(at: file)
+    }
+
+    private func removeDirectoryFromDisk(path: String) {
+        let directory = directoryURL(for: path)
+        try? FileManager.default.removeItem(at: directory)
     }
 
     private static func loadAllFromDisk(from rootDirectory: URL) -> [String: [String: Data]] {
@@ -173,6 +193,11 @@ final class DatabaseService: DatabaseServicing {
             return
         }
         await store.delete(path: path(for: collection, userID: userID), id: id)
+    }
+
+    nonisolated func deleteLocalData(for userID: String) async {
+        await store.delete(path: path(for: .users, userID: nil), id: userID)
+        await store.deletePrefix(pathPrefix: "users/\(userID)")
     }
 
     nonisolated func observeAll<T: Codable>(_ type: T.Type, from collection: AppCollection, userID: String?) -> AsyncThrowingStream<[T], Error> {

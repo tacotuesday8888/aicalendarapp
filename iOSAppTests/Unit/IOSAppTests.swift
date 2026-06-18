@@ -37,11 +37,14 @@ private final class FailingDatabaseService: DatabaseServicing, @unchecked Sendab
             continuation.finish(throwing: error)
         }
     }
+
+    func deleteLocalData(for userID: String) async {}
 }
 
 private final class TestDatabaseService: DatabaseServicing, @unchecked Sendable {
     private var storage = [String: [String: Data]]()
     private let lock = NSLock()
+    private(set) var deletedLocalUserIDs = [String]()
 
     func save<T>(_ value: T, in collection: AppCollection, id: String, userID: String?) async throws where T: Decodable, T: Encodable {
         let data = try JSONEncoder.appEncoder().encode(value)
@@ -84,6 +87,16 @@ private final class TestDatabaseService: DatabaseServicing, @unchecked Sendable 
                     continuation.finish(throwing: error)
                 }
             }
+        }
+    }
+
+    func deleteLocalData(for userID: String) async {
+        lock.withLock {
+            deletedLocalUserIDs.append(userID)
+            storage["users"]?[userID] = nil
+            let prefix = "users/\(userID)/"
+            let paths = storage.keys.filter { $0.hasPrefix(prefix) }
+            paths.forEach { storage[$0] = nil }
         }
     }
 
@@ -735,6 +748,35 @@ struct IOSAppTests {
         try await service.save(profile, in: .users, id: profile.id, userID: nil)
         let fetched = try await service.fetch(UserProfile.self, from: .users, id: profile.id, userID: nil)
         #expect(fetched.email == profile.email)
+    }
+
+    @Test func databaseServicePurgesLocalUserData() async throws {
+        let service = DatabaseService.shared
+        let userID = uniqueUserID("local-delete")
+        let profile = testProfile(id: userID)
+        let start = Date(timeIntervalSince1970: 1_776_000_000)
+        let block = PlannerBlock(
+            title: "Local cleanup check",
+            detail: "Should be removed with account deletion.",
+            startDate: start,
+            endDate: start.addingTimeInterval(60 * 60),
+            type: .studySession,
+            source: .app,
+            linkedGoalID: nil,
+            linkedAssignmentID: nil
+        )
+
+        try await service.save(profile, in: .users, id: userID, userID: nil)
+        try await service.save(block, in: .plannerBlocks, id: block.id, userID: userID)
+
+        await service.deleteLocalData(for: userID)
+
+        await #expect(throws: AppError.dataNotFound) {
+            try await service.fetch(UserProfile.self, from: .users, id: userID, userID: nil)
+        }
+        await #expect(throws: AppError.dataNotFound) {
+            try await service.fetch(PlannerBlock.self, from: .plannerBlocks, id: block.id, userID: userID)
+        }
     }
 
     @Test func plannerBlocksPersistThroughServiceLayerAndDeleteCleanly() async throws {
@@ -1691,6 +1733,7 @@ struct IOSAppTests {
             notificationService: TestNotificationService(),
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: backendService,
+            databaseService: TestDatabaseService(),
             analyticsService: TestAnalyticsService()
         )
 
@@ -1719,6 +1762,7 @@ struct IOSAppTests {
             notificationService: notificationService,
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: analyticsService
         )
 
@@ -1739,6 +1783,7 @@ struct IOSAppTests {
         let notificationService = TestNotificationService()
         try? await notificationService.schedule(rule: ReminderRule.defaultRules[0])
         let analyticsService = TestAnalyticsService()
+        let databaseService = TestDatabaseService()
         let viewModel = SettingsViewModel(
             user: profile,
             authService: authService,
@@ -1747,12 +1792,14 @@ struct IOSAppTests {
             notificationService: notificationService,
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: backendService,
+            databaseService: databaseService,
             analyticsService: analyticsService
         )
 
         await viewModel.deleteAccount()
 
         #expect(backendService.deletedUserIDs == [profile.id])
+        #expect(databaseService.deletedLocalUserIDs == [profile.id])
         #expect(authService.didSignOut)
         #expect(notificationService.cancelledReminderCounts == [1])
         #expect(notificationService.scheduledRules.isEmpty)
@@ -1773,6 +1820,7 @@ struct IOSAppTests {
             notificationService: TestNotificationService(),
             subscriptionService: subscriptionService,
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: TestAnalyticsService()
         )
 
@@ -1801,6 +1849,7 @@ struct IOSAppTests {
             notificationService: notificationService,
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: analyticsService
         )
 
@@ -1826,6 +1875,7 @@ struct IOSAppTests {
             notificationService: notificationService,
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: analyticsService
         )
 
@@ -1851,6 +1901,7 @@ struct IOSAppTests {
             notificationService: TestNotificationService(),
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: analyticsService
         )
         viewModel.selectedCalendarIDs = []
@@ -1878,6 +1929,7 @@ struct IOSAppTests {
             notificationService: TestNotificationService(),
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: TestAnalyticsService()
         )
         viewModel.selectedCalendarIDs = []
@@ -1905,6 +1957,7 @@ struct IOSAppTests {
             notificationService: TestNotificationService(),
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: TestAnalyticsService()
         )
         viewModel.selectedCalendarIDs = []
@@ -1933,6 +1986,7 @@ struct IOSAppTests {
             notificationService: TestNotificationService(),
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: TestAnalyticsService()
         )
         viewModel.selectedCalendarIDs = ["personal"]
@@ -1961,6 +2015,7 @@ struct IOSAppTests {
             notificationService: TestNotificationService(),
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
             analyticsService: TestAnalyticsService()
         )
         viewModel.selectedCalendarIDs = ["personal"]
