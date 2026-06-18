@@ -241,6 +241,17 @@ extension AppDelegate: MessagingDelegate {
 #endif
 
 #if canImport(RevenueCat) && canImport(SuperwallKit)
+enum RevenueCatSuperwallPurchaseOutcome: Equatable {
+    case purchased
+    case cancelled
+}
+
+struct RevenueCatSuperwallPurchaseResultMapper {
+    static func outcome(userCancelled: Bool) -> RevenueCatSuperwallPurchaseOutcome {
+        userCancelled ? .cancelled : .purchased
+    }
+}
+
 private final class AICalendarRevenueCatPurchaseController: PurchaseController {
     private let entitlementID: String
 
@@ -260,8 +271,13 @@ private final class AICalendarRevenueCatPurchaseController: PurchaseController {
                 return .failed(AppError.dataNotFound)
             }
             let result = try await Purchases.shared.purchase(product: revenueCatProduct)
-            syncSubscriptionStatus(customerInfo: result.customerInfo)
-            return .purchased
+            switch RevenueCatSuperwallPurchaseResultMapper.outcome(userCancelled: result.userCancelled) {
+            case .cancelled:
+                return .cancelled
+            case .purchased:
+                syncSubscriptionStatus(customerInfo: result.customerInfo)
+                return .purchased
+            }
         } catch let error as RevenueCat.ErrorCode {
             return error == .paymentPendingError ? .pending : .failed(error)
         } catch {
