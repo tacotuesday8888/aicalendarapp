@@ -1272,6 +1272,45 @@ struct IOSAppTests {
         #expect(observedState?.trialEligible == false)
     }
 
+    @Test func linkedSubscriptionIdentityStoreRequiresExplicitSuccessfulMark() async {
+        let store = LinkedSubscriptionIdentityStore()
+        let userID = uniqueUserID("subscription-identity")
+
+        let initiallyLinked = await store.isLinked(to: userID)
+        let initiallyKnown = await store.hasKnownUser()
+        let initialLinkedUserID = await store.currentLinkedUserID()
+        #expect(!initiallyLinked)
+        #expect(initiallyKnown == false)
+        #expect(initialLinkedUserID == nil)
+
+        await store.markPending(userID)
+
+        let pendingKnown = await store.hasKnownUser()
+        let pendingLinked = await store.isLinked(to: userID)
+        let pendingLinkedUserID = await store.currentLinkedUserID()
+        #expect(pendingKnown)
+        #expect(pendingLinked == false)
+        #expect(pendingLinkedUserID == nil)
+
+        await store.markLinked(userID)
+
+        let linked = await store.isLinked(to: userID)
+        let linkedUserID = await store.currentLinkedUserID()
+        #expect(linked)
+        #expect(linkedUserID == userID)
+        let otherUserLinked = await store.isLinked(to: "\(userID)-other")
+        #expect(!otherUserLinked)
+
+        await store.markUnlinked()
+
+        let linkedAfterUnlink = await store.isLinked(to: userID)
+        let knownAfterUnlink = await store.hasKnownUser()
+        let linkedUserIDAfterUnlink = await store.currentLinkedUserID()
+        #expect(!linkedAfterUnlink)
+        #expect(knownAfterUnlink == false)
+        #expect(linkedUserIDAfterUnlink == nil)
+    }
+
     @Test func subscriptionSyncResponseMapsBackendBetaSnapshot() throws {
         let data = """
         {
