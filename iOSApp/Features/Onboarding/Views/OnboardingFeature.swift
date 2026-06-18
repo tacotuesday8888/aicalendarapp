@@ -118,8 +118,19 @@ final class OnboardingViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            profile.academicFocus = focusArea
-            state.didCompleteProfile = !focusArea.isEmpty || !profile.displayName.isEmpty
+            let trimmedFocusArea = focusArea.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDisplayName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            profile.academicFocus = trimmedFocusArea
+            profile.displayName = trimmedDisplayName
+
+            guard !trimmedFocusArea.isEmpty || !trimmedDisplayName.isEmpty else {
+                state.didCompleteProfile = false
+                state.completedAt = nil
+                errorMessage = "Add an academic focus before continuing."
+                return
+            }
+
+            state.didCompleteProfile = true
             state.completedAt = .now
             try await sessionViewModel.completeOnboarding(profile: profile, onboarding: state)
         } catch {
