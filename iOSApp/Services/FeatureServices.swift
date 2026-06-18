@@ -291,7 +291,7 @@ final class CalendarSyncService: CalendarSyncServicing {
     func importedPlannerBlockID(for event: EKEvent) -> String {
         let occurrenceDate = event.occurrenceDate
         let isRecurring = event.hasRecurrenceRules || occurrenceDate != nil
-        Self.importedPlannerBlockID(
+        return Self.importedPlannerBlockID(
             calendarIdentifier: event.calendar.calendarIdentifier,
             externalIdentifier: event.calendarItemExternalIdentifier,
             localIdentifier: event.eventIdentifier ?? event.calendarItemIdentifier,
