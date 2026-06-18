@@ -439,6 +439,64 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
     }
 }
 
+private final class TestSyllabusImportService: SyllabusImportServicing {
+    var observedJobs = [ImportJob]()
+    var importTextResult: ImportJob?
+    var importFileResult: ImportJob?
+    var importError: Error?
+    var commitError: Error?
+    private(set) var importedTexts = [String]()
+    private(set) var importFileURLs = [URL]()
+    private(set) var committedJobs = [ImportJob]()
+    private(set) var deletedJobIDs = [String]()
+
+    func observeImports(for userID: String) -> AsyncThrowingStream<[ImportJob], Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(observedJobs)
+            continuation.finish()
+        }
+    }
+
+    func importText(_ text: String, for userID: String) async throws -> ImportJob {
+        if let importError {
+            throw importError
+        }
+        importedTexts.append(text)
+        return importTextResult ?? ImportJob(
+            sourceName: "text-import",
+            status: .completed,
+            extractedCourses: [],
+            extractedAssignments: [],
+            warnings: []
+        )
+    }
+
+    func importFile(at fileURL: URL, for userID: String) async throws -> ImportJob {
+        if let importError {
+            throw importError
+        }
+        importFileURLs.append(fileURL)
+        return importFileResult ?? ImportJob(
+            sourceName: fileURL.lastPathComponent,
+            status: .completed,
+            extractedCourses: [],
+            extractedAssignments: [],
+            warnings: []
+        )
+    }
+
+    func commit(_ job: ImportJob, for userID: String) async throws {
+        if let commitError {
+            throw commitError
+        }
+        committedJobs.append(job)
+    }
+
+    func delete(_ job: ImportJob, for userID: String) async throws {
+        deletedJobIDs.append(job.id)
+    }
+}
+
 @MainActor
 struct IOSAppTests {
     private func uniqueUserID(_ prefix: String = "test-user") -> String {
@@ -459,6 +517,33 @@ struct IOSAppTests {
             assistantOptIn: true,
             selectedCalendarIDs: [],
             createdAt: Date(timeIntervalSince1970: 1_776_000_000)
+        )
+    }
+
+    private func testImportJob(id: String = UUID().uuidString) -> ImportJob {
+        let course = Course(
+            id: "course-\(id)",
+            title: "Computer Science 101",
+            instructor: "Dr. Rivera",
+            meetingDays: ["Mon", "Wed"],
+            colorHex: "#2F6BFF"
+        )
+        let assignment = Assignment(
+            id: "assignment-\(id)",
+            courseID: course.id,
+            title: "Homework 1",
+            dueDate: Date(timeIntervalSince1970: 1_779_724_800),
+            notes: "Imported from syllabus.",
+            isComplete: false
+        )
+
+        return ImportJob(
+            id: id,
+            sourceName: "text-import",
+            status: .completed,
+            extractedCourses: [course],
+            extractedAssignments: [assignment],
+            warnings: []
         )
     }
 
@@ -1806,6 +1891,55 @@ struct IOSAppTests {
         #expect(viewModel.errorMessage == nil)
         #expect(analyticsService.events.contains("onboarding_completed"))
         #expect(!viewModel.isLoading)
+    }
+
+    @Test func importsViewModelParsesTrimmedTextForReview() async throws {
+        let profile = testProfile(id: uniqueUserID("imports-text"))
+        let importService = TestSyllabusImportService()
+        let job = testImportJob(id: "text-job")
+        importService.importTextResult = job
+        let analyticsService = TestAnalyticsService()
+        let viewModel = ImportsViewModel(
+            user: profile,
+            syllabusImportService: importService,
+            analyticsService: analyticsService
+        )
+
+        viewModel.importedText = " \n  CS 101\nHomework 1 due Friday  \t"
+        await viewModel.importText()
+
+        #expect(importService.importedTexts == ["CS 101\nHomework 1 due Friday"])
+        #expect(viewModel.latestJob == job)
+        #expect(viewModel.reviewingJob == job)
+        #expect(viewModel.statusMessage == "Parsed 1 assignments from text.")
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.events.contains("syllabus_import_started"))
+        #expect(!viewModel.isImporting)
+    }
+
+    @Test func importsViewModelCommitUpdatesVisibleCommittedJob() async throws {
+        let profile = testProfile(id: uniqueUserID("imports-commit"))
+        let importService = TestSyllabusImportService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = ImportsViewModel(
+            user: profile,
+            syllabusImportService: importService,
+            analyticsService: analyticsService
+        )
+        let job = testImportJob(id: "commit-job")
+
+        try await viewModel.commit(job)
+
+        #expect(importService.committedJobs == [job])
+        #expect(viewModel.latestJob?.id == job.id)
+        #expect(viewModel.latestJob?.status == .committed)
+        #expect(viewModel.latestJob?.committedAt != nil)
+        #expect(viewModel.reviewingJob?.id == job.id)
+        #expect(viewModel.reviewingJob?.status == .committed)
+        #expect(viewModel.statusMessage == "Imported 1 courses and 1 assignments.")
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.events.contains("import_commit_confirmed"))
+        #expect(viewModel.committingJobID == nil)
     }
 
     @Test func assistantDraftCommitRequiresLiveBackend() async throws {
