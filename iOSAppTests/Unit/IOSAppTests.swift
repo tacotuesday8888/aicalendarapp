@@ -232,6 +232,7 @@ private final class TestGoalService: GoalServicing {
 private final class TestAuthService: AuthServicing {
     var currentUserID: String?
     var profile: UserProfile?
+    var authStates: [UserProfile?]?
     private(set) var didSignOut = false
 
     init(currentUserID: String? = nil, profile: UserProfile? = nil) {
@@ -241,7 +242,9 @@ private final class TestAuthService: AuthServicing {
 
     func authStateStream() -> AsyncStream<UserProfile?> {
         AsyncStream { continuation in
-            continuation.yield(profile)
+            for state in authStates ?? [profile] {
+                continuation.yield(state)
+            }
             continuation.finish()
         }
     }
@@ -341,6 +344,8 @@ private final class TestNotificationService: NotificationServicing {
     private(set) var scheduledRules = [ReminderRule]()
     private(set) var syncedRuleSets = [[ReminderRule]]()
     private(set) var cancelledReminderCounts = [Int]()
+    private(set) var clearedRemoteTokenUserIDs = [String]()
+    var shouldClearRemoteToken = true
 
     func requestAuthorization() async throws -> NotificationPermissionState {
         state = authorizationResult
@@ -371,6 +376,11 @@ private final class TestNotificationService: NotificationServicing {
         scheduledRules.removeAll()
         cancelledReminderCounts.append(count)
         return count
+    }
+
+    func clearRemoteToken(for userID: String) async -> Bool {
+        clearedRemoteTokenUserIDs.append(userID)
+        return shouldClearRemoteToken
     }
 
     func updateRemoteToken(_ token: String) {}
@@ -1451,6 +1461,29 @@ struct IOSAppTests {
         #expect(analyticsService.events.contains("notification_reminders_cancelled"))
     }
 
+    @Test func appSessionClearsRemoteTokenWhenSignedInUserLeavesAuthState() async throws {
+        let profile = testProfile(id: uniqueUserID("session-remote-token"))
+        let authService = TestAuthService(currentUserID: profile.id, profile: profile)
+        authService.authStates = [profile, nil]
+        let notificationService = TestNotificationService()
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: authService,
+            userService: TestUserService(profile: profile),
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService,
+            notificationService: notificationService
+        )
+
+        _ = AppSessionViewModel(container: container)
+        for _ in 0..<50 where notificationService.clearedRemoteTokenUserIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(notificationService.clearedRemoteTokenUserIDs == [profile.id])
+        #expect(analyticsService.events.contains("notification_remote_token_cleared"))
+    }
+
     @Test func appSessionShowsRetryableUserContextErrorInsteadOfCompletingOnboardingOnLoadFailure() async throws {
         let profile = testProfile(id: uniqueUserID("session-context-failure"))
         let userService = TestUserService(profile: profile)
@@ -1646,8 +1679,10 @@ struct IOSAppTests {
         await viewModel.signOut()
 
         #expect(authService.didSignOut)
+        #expect(notificationService.clearedRemoteTokenUserIDs == [profile.id])
         #expect(notificationService.cancelledReminderCounts == [1])
         #expect(notificationService.scheduledRules.isEmpty)
+        #expect(analyticsService.events.contains("notification_remote_token_cleared"))
         #expect(analyticsService.events.contains("notification_reminders_cancelled"))
     }
 

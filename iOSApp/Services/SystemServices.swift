@@ -1,5 +1,8 @@
 import Foundation
 import UserNotifications
+#if canImport(FirebaseMessaging)
+import FirebaseMessaging
+#endif
 #if canImport(FirebaseAnalytics)
 import FirebaseAnalytics
 #endif
@@ -158,6 +161,23 @@ final class NotificationService: NotificationServicing {
         return reminderIDs.count
     }
 
+    func clearRemoteToken(for userID: String) async -> Bool {
+        guard let userService else { return false }
+        guard let token = await currentRemoteTokenIfAvailable() else { return false }
+
+        do {
+            var profile = try await userService.fetchProfile(for: userID)
+            guard profile.pushToken == token else { return false }
+            profile.pushToken = nil
+            try await userService.saveProfile(profile)
+            logger.info("Cleared remote push token for \(userID).")
+            return true
+        } catch {
+            logger.error("Failed to clear remote push token: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     static func shouldRemovePendingReminderRequest(
         identifier: String,
         userInfo: [AnyHashable: Any],
@@ -202,6 +222,41 @@ final class NotificationService: NotificationServicing {
             }
         }
     }
+
+    private func currentRemoteTokenIfAvailable() async -> String? {
+        if let remoteToken {
+            return remoteToken
+        }
+
+        #if canImport(FirebaseMessaging)
+        do {
+            let token = try await fetchFirebaseMessagingToken()
+            remoteToken = token
+            return token
+        } catch {
+            logger.error("Failed to fetch remote push token: \(error.localizedDescription)")
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
+    #if canImport(FirebaseMessaging)
+    private func fetchFirebaseMessagingToken() async throws -> String {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            Messaging.messaging().token { token, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let token {
+                    continuation.resume(returning: token)
+                } else {
+                    continuation.resume(throwing: AppError.unknown("Firebase Messaging returned an empty token."))
+                }
+            }
+        }
+    }
+    #endif
 
     private func pendingNotificationRequests() async -> [UNNotificationRequest] {
         await withCheckedContinuation { continuation in
