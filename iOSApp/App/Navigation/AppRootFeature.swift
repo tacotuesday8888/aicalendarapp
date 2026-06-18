@@ -8,6 +8,8 @@ final class AppSessionViewModel: ObservableObject {
     @Published private(set) var subscriptionState = SubscriptionState.locked
     @Published private(set) var subscriptionRefreshError: String?
     @Published private(set) var isRefreshingSubscription = false
+    @Published private(set) var calendarRefreshError: String?
+    @Published private(set) var isRefreshingCalendarImport = false
     @Published var pendingRoute: AppRoute?
 
     let container: AppContainer
@@ -79,6 +81,33 @@ final class AppSessionViewModel: ObservableObject {
         container.analyticsService.track(event: "deep_link_opened", parameters: [
             "url": url.absoluteString
         ])
+    }
+
+    func refreshCalendarImports(trigger: String) async {
+        guard let userID = currentUser?.id, !isRefreshingCalendarImport else { return }
+
+        isRefreshingCalendarImport = true
+        defer { isRefreshingCalendarImport = false }
+
+        do {
+            let profile = try await container.userService.fetchProfile(for: userID)
+            authState = .loaded(profile)
+            guard !profile.selectedCalendarIDs.isEmpty else {
+                calendarRefreshError = nil
+                return
+            }
+
+            let blocks = try await container.calendarSyncService.importSelectedCalendars(profile.selectedCalendarIDs, for: userID)
+            calendarRefreshError = nil
+            container.analyticsService.track(event: "calendar_sync_auto_refreshed", parameters: [
+                "trigger": trigger,
+                "calendarCount": profile.selectedCalendarIDs.count,
+                "blockCount": blocks.count
+            ])
+        } catch {
+            container.analyticsService.record(error: error, context: "calendar_sync_auto_refresh")
+            calendarRefreshError = AppError.wrap(error, fallback: "Could not refresh Apple Calendar.").errorDescription
+        }
     }
 
     private func observeAuth() {
