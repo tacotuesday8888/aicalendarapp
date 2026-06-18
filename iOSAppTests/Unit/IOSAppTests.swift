@@ -295,7 +295,7 @@ private final class TestUserService: UserServicing {
         if let fetchOnboardingError {
             throw fetchOnboardingError
         }
-        onboardingState
+        return onboardingState
     }
 
     func saveOnboardingState(_ state: OnboardingState, for userID: String) async throws {
