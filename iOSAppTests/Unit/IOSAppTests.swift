@@ -268,6 +268,8 @@ private final class TestUserService: UserServicing {
 private final class TestCalendarSyncService: CalendarSyncServicing {
     var calendars = [SyncLink]()
     var disconnectError: Error?
+    var importError: Error?
+    var importedBlocks = [PlannerBlock]()
     private(set) var importedCalendarIDs = [[String]]()
     private(set) var disconnectedUserIDs = [String]()
 
@@ -280,8 +282,11 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
     }
 
     func importSelectedCalendars(_ selectedCalendarIDs: [String], for userID: String) async throws -> [PlannerBlock] {
+        if let importError {
+            throw importError
+        }
         importedCalendarIDs.append(selectedCalendarIDs)
-        return []
+        return importedBlocks
     }
 
     func disconnectCalendars(for userID: String) async throws {
@@ -462,6 +467,7 @@ struct IOSAppTests {
         userService: UserServicing,
         subscriptionService: SubscriptionServicing,
         analyticsService: AnalyticsServicing = TestAnalyticsService(),
+        calendarSyncService: CalendarSyncServicing = TestCalendarSyncService(),
         notificationService: NotificationServicing = TestNotificationService()
     ) -> AppContainer {
         AppContainer(
@@ -471,7 +477,7 @@ struct IOSAppTests {
             userService: userService,
             goalService: TestGoalService(),
             plannerService: TestPlannerService(),
-            calendarSyncService: TestCalendarSyncService(),
+            calendarSyncService: calendarSyncService,
             studySessionService: StudySessionService.shared,
             reflectionService: ReflectionService.shared,
             assistantService: AssistantService.shared,
@@ -1254,6 +1260,93 @@ struct IOSAppTests {
         #expect(!viewModel.onboardingState.isComplete)
         #expect(notificationService.syncedRuleSets.isEmpty)
         #expect(notificationService.scheduledRules.isEmpty)
+    }
+
+    @Test func appSessionRefreshesSelectedCalendarImportsFromLatestProfile() async throws {
+        var initialProfile = testProfile(id: uniqueUserID("session-calendar-refresh"))
+        initialProfile.selectedCalendarIDs = []
+        var savedProfile = initialProfile
+        savedProfile.selectedCalendarIDs = ["school", "personal"]
+        let userService = TestUserService(profile: savedProfile)
+        let calendarSyncService = TestCalendarSyncService()
+        calendarSyncService.importedBlocks = [
+            PlannerBlock(
+                id: "apple-school-class",
+                title: "Biology lecture",
+                detail: "",
+                startDate: Date(timeIntervalSince1970: 1_776_000_000),
+                endDate: Date(timeIntervalSince1970: 1_776_003_600),
+                type: .classEvent,
+                source: .appleCalendar,
+                linkedGoalID: nil,
+                linkedAssignmentID: nil
+            )
+        ]
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: initialProfile.id, profile: initialProfile),
+            userService: userService,
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService,
+            calendarSyncService: calendarSyncService
+        )
+        let viewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where viewModel.currentUser == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        await viewModel.refreshCalendarImports(trigger: "test")
+
+        #expect(calendarSyncService.importedCalendarIDs == [["school", "personal"]])
+        #expect(viewModel.currentUser?.selectedCalendarIDs == ["school", "personal"])
+        #expect(viewModel.calendarRefreshError == nil)
+        #expect(analyticsService.events.contains("calendar_sync_auto_refreshed"))
+    }
+
+    @Test func appSessionSkipsCalendarRefreshWhenNoCalendarsAreSelected() async {
+        let profile = testProfile(id: uniqueUserID("session-calendar-refresh-empty"))
+        let calendarSyncService = TestCalendarSyncService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: TestUserService(profile: profile),
+            subscriptionService: TestSubscriptionService(),
+            calendarSyncService: calendarSyncService
+        )
+        let viewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where viewModel.currentUser == nil {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        await viewModel.refreshCalendarImports(trigger: "test")
+
+        #expect(calendarSyncService.importedCalendarIDs.isEmpty)
+        #expect(viewModel.calendarRefreshError == nil)
+    }
+
+    @Test func appSessionReportsCalendarRefreshFailureWithoutClearingSelection() async {
+        var profile = testProfile(id: uniqueUserID("session-calendar-refresh-failure"))
+        profile.selectedCalendarIDs = ["school"]
+        let calendarSyncService = TestCalendarSyncService()
+        calendarSyncService.importError = AppError.permissionDenied("calendar access")
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: TestUserService(profile: profile),
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService,
+            calendarSyncService: calendarSyncService
+        )
+        let viewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where viewModel.currentUser == nil {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        await viewModel.refreshCalendarImports(trigger: "test")
+
+        #expect(calendarSyncService.importedCalendarIDs.isEmpty)
+        #expect(viewModel.currentUser?.selectedCalendarIDs == ["school"])
+        #expect(viewModel.calendarRefreshError == "Permission for calendar access was denied.")
+        #expect(analyticsService.errors.contains("calendar_sync_auto_refresh"))
     }
 
     @Test func notificationServiceRecognizesCurrentMarkedAndLegacyReminderRequests() {

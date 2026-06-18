@@ -1,3 +1,4 @@
+import EventKit
 import SwiftUI
 import Combine
 
@@ -89,11 +90,13 @@ final class AssistantViewModel: ObservableObject {
 }
 
 struct AppShellView: View {
+    @Environment(\.scenePhase) private var scenePhase
     let container: AppContainer
     @ObservedObject var sessionViewModel: AppSessionViewModel
     @State private var selectedTab: AppTab = .today
     @State private var showAssistant = false
     @State private var presentedPaywallTrigger: PaywallTrigger?
+    @State private var didRequestInitialCalendarRefresh = false
 
     private var user: UserProfile? {
         sessionViewModel.currentUser
@@ -168,9 +171,19 @@ struct AppShellView: View {
                             }
                         )
                     }
-                    .onAppear { applyPendingRoute() }
+                    .onAppear {
+                        applyPendingRoute()
+                        requestInitialCalendarRefreshIfNeeded()
+                    }
                     .onChange(of: sessionViewModel.pendingRoute) { _, _ in
                         applyPendingRoute()
+                    }
+                    .onChange(of: scenePhase) { _, phase in
+                        guard phase == .active else { return }
+                        Task { await sessionViewModel.refreshCalendarImports(trigger: "foreground") }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+                        Task { await sessionViewModel.refreshCalendarImports(trigger: "event_store_changed") }
                     }
                 } else {
                     ContentUnavailableView("Session unavailable", systemImage: "person.crop.circle.badge.exclamationmark")
@@ -206,6 +219,12 @@ struct AppShellView: View {
         }
         presentedPaywallTrigger = trigger
         return true
+    }
+
+    private func requestInitialCalendarRefreshIfNeeded() {
+        guard !didRequestInitialCalendarRefresh else { return }
+        didRequestInitialCalendarRefresh = true
+        Task { await sessionViewModel.refreshCalendarImports(trigger: "app_shell_appear") }
     }
 }
 
