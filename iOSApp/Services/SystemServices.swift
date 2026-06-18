@@ -49,6 +49,7 @@ final class NotificationService: NotificationServicing {
     private static let reminderTypeUserInfoKey = "aicalendar_notification_type"
     private static let reminderRuleIDUserInfoKey = "aicalendar_reminder_rule_id"
     private static let checkInReminderType = "check_in_reminder"
+    private static let checkInReminderBody = "Take a minute to keep your plan aligned."
 
     func requestAuthorization() async throws -> NotificationPermissionState {
         let granted = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
@@ -91,7 +92,7 @@ final class NotificationService: NotificationServicing {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
         let content = UNMutableNotificationContent()
         content.title = rule.title
-        content.body = "Take a minute to keep your plan aligned."
+        content.body = Self.checkInReminderBody
         content.sound = .default
         content.userInfo = [
             Self.reminderTypeUserInfoKey: Self.checkInReminderType,
@@ -120,9 +121,12 @@ final class NotificationService: NotificationServicing {
         let currentRuleIDs = Set(rules.map(\.id))
         let pendingRequests = await pendingNotificationRequests()
         let staleReminderIDs = pendingRequests.compactMap { request -> String? in
-            let isCheckInReminder = request.content.userInfo[Self.reminderTypeUserInfoKey] as? String == Self.checkInReminderType
-            let isCurrentRule = currentRuleIDs.contains(request.identifier)
-            return isCheckInReminder || isCurrentRule ? request.identifier : nil
+            Self.shouldRemovePendingReminderRequest(
+                identifier: request.identifier,
+                userInfo: request.content.userInfo,
+                body: request.content.body,
+                currentRuleIDs: currentRuleIDs
+            ) ? request.identifier : nil
         }
 
         if !staleReminderIDs.isEmpty {
@@ -134,6 +138,18 @@ final class NotificationService: NotificationServicing {
             try await schedule(rule: rule)
         }
         return enabledRules.count
+    }
+
+    static func shouldRemovePendingReminderRequest(
+        identifier: String,
+        userInfo: [AnyHashable: Any],
+        body: String,
+        currentRuleIDs: Set<String>
+    ) -> Bool {
+        let isMarkedCheckInReminder = userInfo[reminderTypeUserInfoKey] as? String == checkInReminderType
+        let isCurrentRule = currentRuleIDs.contains(identifier)
+        let isLegacyCheckInReminder = body == checkInReminderBody
+        return isMarkedCheckInReminder || isCurrentRule || isLegacyCheckInReminder
     }
 
     func updateRemoteToken(_ token: String) {

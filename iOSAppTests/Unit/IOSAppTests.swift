@@ -267,6 +267,7 @@ private final class TestUserService: UserServicing {
 
 private final class TestCalendarSyncService: CalendarSyncServicing {
     var calendars = [SyncLink]()
+    var disconnectError: Error?
     private(set) var importedCalendarIDs = [[String]]()
     private(set) var disconnectedUserIDs = [String]()
 
@@ -284,6 +285,9 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
     }
 
     func disconnectCalendars(for userID: String) async throws {
+        if let disconnectError {
+            throw disconnectError
+        }
         disconnectedUserIDs.append(userID)
     }
 }
@@ -1252,6 +1256,35 @@ struct IOSAppTests {
         #expect(notificationService.scheduledRules.isEmpty)
     }
 
+    @Test func notificationServiceRecognizesCurrentMarkedAndLegacyReminderRequests() {
+        let currentRuleIDs: Set<String> = ["morning-rule"]
+
+        #expect(NotificationService.shouldRemovePendingReminderRequest(
+            identifier: "morning-rule",
+            userInfo: [:],
+            body: "Different body",
+            currentRuleIDs: currentRuleIDs
+        ))
+        #expect(NotificationService.shouldRemovePendingReminderRequest(
+            identifier: "old-rule",
+            userInfo: ["aicalendar_notification_type": "check_in_reminder"],
+            body: "Different body",
+            currentRuleIDs: currentRuleIDs
+        ))
+        #expect(NotificationService.shouldRemovePendingReminderRequest(
+            identifier: "old-unmarked-rule",
+            userInfo: [:],
+            body: "Take a minute to keep your plan aligned.",
+            currentRuleIDs: currentRuleIDs
+        ))
+        #expect(!NotificationService.shouldRemovePendingReminderRequest(
+            identifier: "session_timer_abc",
+            userInfo: [:],
+            body: "Session complete",
+            currentRuleIDs: currentRuleIDs
+        ))
+    }
+
     @Test func settingsViewModelPreparesExportDocumentFromBackendPayload() async throws {
         let profile = testProfile(id: uniqueUserID("settings-export"))
         let backendService = TestBackendFunctionService()
@@ -1413,6 +1446,31 @@ struct IOSAppTests {
         #expect(analyticsService.events.contains("calendar_sync_disconnected"))
     }
 
+    @Test func settingsViewModelKeepsCalendarSelectionWhenDisconnectCleanupFails() async {
+        var profile = testProfile(id: uniqueUserID("settings-calendar-disconnect-failure"))
+        profile.selectedCalendarIDs = ["school"]
+        let calendarSyncService = TestCalendarSyncService()
+        calendarSyncService.disconnectError = AppError.network(description: "Cleanup failed.")
+        let userService = TestUserService(profile: profile)
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: userService,
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: TestAnalyticsService()
+        )
+        viewModel.selectedCalendarIDs = []
+
+        await viewModel.syncCalendars()
+
+        #expect(userService.savedProfiles.isEmpty)
+        #expect(viewModel.profile.selectedCalendarIDs == ["school"])
+        #expect(viewModel.statusMessage == "Cleanup failed.")
+    }
+
     @Test func calendarDisconnectDeletesOnlyAppleCalendarPlannerBlocks() async throws {
         let userID = uniqueUserID("calendar-disconnect")
         let database = TestDatabaseService()
@@ -1461,13 +1519,15 @@ struct IOSAppTests {
             calendarIdentifier: "school/calendar",
             externalIdentifier: "external-recurring-class",
             localIdentifier: "local-event-1",
-            occurrenceDate: firstOccurrence
+            occurrenceDate: firstOccurrence,
+            isRecurring: true
         )
         let secondID = CalendarSyncService.importedPlannerBlockID(
             calendarIdentifier: "school/calendar",
             externalIdentifier: "external-recurring-class",
             localIdentifier: "local-event-1",
-            occurrenceDate: secondOccurrence
+            occurrenceDate: secondOccurrence,
+            isRecurring: true
         )
 
         #expect(firstID != secondID)
@@ -1484,16 +1544,38 @@ struct IOSAppTests {
             calendarIdentifier: "school",
             externalIdentifier: "external-class-id",
             localIdentifier: "local-event-before-sync",
-            occurrenceDate: occurrence
+            occurrenceDate: occurrence,
+            isRecurring: true
         )
         let syncedID = CalendarSyncService.importedPlannerBlockID(
             calendarIdentifier: "school",
             externalIdentifier: "external-class-id",
             localIdentifier: "local-event-after-sync",
-            occurrenceDate: occurrence
+            occurrenceDate: occurrence,
+            isRecurring: true
         )
 
         #expect(originalID == syncedID)
+    }
+
+    @Test func importedCalendarBlockIDStaysStableWhenNonRecurringEventMoves() {
+        let originalID = CalendarSyncService.importedPlannerBlockID(
+            calendarIdentifier: "school",
+            externalIdentifier: "external-one-off-id",
+            localIdentifier: "local-event-id",
+            occurrenceDate: Date(timeIntervalSince1970: 1_776_000_000),
+            isRecurring: false
+        )
+        let movedID = CalendarSyncService.importedPlannerBlockID(
+            calendarIdentifier: "school",
+            externalIdentifier: "external-one-off-id",
+            localIdentifier: "local-event-id",
+            occurrenceDate: Date(timeIntervalSince1970: 1_776_086_400),
+            isRecurring: false
+        )
+
+        #expect(originalID == movedID)
+        #expect(originalID == "apple-school-external-one-off-id")
     }
 
     @Test func importedCalendarPrefixUsesSameSanitizationAsImportedBlockIDs() {
@@ -1502,7 +1584,8 @@ struct IOSAppTests {
             calendarIdentifier: "school/calendar:primary",
             externalIdentifier: "external-class-id",
             localIdentifier: nil,
-            occurrenceDate: Date(timeIntervalSince1970: 1_776_000_000)
+            occurrenceDate: Date(timeIntervalSince1970: 1_776_000_000),
+            isRecurring: false
         )
 
         #expect(prefix == "apple-school_calendar_primary-")

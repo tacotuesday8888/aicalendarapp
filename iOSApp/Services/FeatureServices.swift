@@ -289,11 +289,14 @@ final class CalendarSyncService: CalendarSyncServicing {
     }
 
     func importedPlannerBlockID(for event: EKEvent) -> String {
+        let occurrenceDate = event.occurrenceDate
+        let isRecurring = event.hasRecurrenceRules || occurrenceDate != nil
         Self.importedPlannerBlockID(
             calendarIdentifier: event.calendar.calendarIdentifier,
             externalIdentifier: event.calendarItemExternalIdentifier,
             localIdentifier: event.eventIdentifier ?? event.calendarItemIdentifier,
-            occurrenceDate: event.occurrenceDate ?? event.startDate
+            occurrenceDate: occurrenceDate ?? (event.hasRecurrenceRules ? event.startDate : nil),
+            isRecurring: isRecurring
         )
     }
 
@@ -301,11 +304,15 @@ final class CalendarSyncService: CalendarSyncServicing {
         calendarIdentifier: String,
         externalIdentifier: String?,
         localIdentifier: String?,
-        occurrenceDate: Date?
+        occurrenceDate: Date?,
+        isRecurring: Bool
     ) -> String {
         let stableEventIdentifier = firstNonBlank(externalIdentifier, localIdentifier) ?? "unknown"
-        let occurrenceComponent = occurrenceDate.map { ISO8601DateFormatter.appJSON.string(from: $0) } ?? "undated"
-        let rawIdentifier = "apple-\(calendarIdentifier)-\(stableEventIdentifier)-\(occurrenceComponent)"
+        let rawIdentifier = if isRecurring {
+            "apple-\(calendarIdentifier)-\(stableEventIdentifier)-\(occurrenceDate.map { ISO8601DateFormatter.appJSON.string(from: $0) } ?? "undated")"
+        } else {
+            "apple-\(calendarIdentifier)-\(stableEventIdentifier)"
+        }
         return sanitizedImportedIdentifier(rawIdentifier)
     }
 

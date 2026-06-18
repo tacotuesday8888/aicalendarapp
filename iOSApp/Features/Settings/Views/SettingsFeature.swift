@@ -112,16 +112,19 @@ final class SettingsViewModel: ObservableObject {
         defer { isSyncingCalendars = false }
 
         do {
-            profile.selectedCalendarIDs = Array(selectedCalendarIDs).sorted()
-            try await userService.saveProfile(profile)
+            let selectedIDs = Array(selectedCalendarIDs).sorted()
 
-            guard !profile.selectedCalendarIDs.isEmpty else {
+            guard !selectedIDs.isEmpty else {
                 try await calendarSyncService.disconnectCalendars(for: profile.id)
+                profile.selectedCalendarIDs = []
+                try await userService.saveProfile(profile)
                 statusMessage = "Apple Calendar disconnected and imported blocks were removed."
                 analyticsService.track(event: "calendar_sync_disconnected")
                 return
             }
 
+            profile.selectedCalendarIDs = selectedIDs
+            try await userService.saveProfile(profile)
             _ = try await calendarSyncService.importSelectedCalendars(profile.selectedCalendarIDs, for: profile.id)
             statusMessage = "Calendar import refreshed."
             analyticsService.track(event: "calendar_sync_imported", parameters: ["count": profile.selectedCalendarIDs.count])
