@@ -181,7 +181,15 @@ final class SettingsViewModel: ObservableObject {
         defer { isSigningOut = false }
 
         do {
+            let clearedToken = await notificationService.clearRemoteToken(for: profile.id)
+            if clearedToken {
+                analyticsService.track(event: "notification_remote_token_cleared")
+            }
             try await authService.signOut()
+            let cancelledCount = await notificationService.cancelReminderNotifications()
+            if cancelledCount > 0 {
+                analyticsService.track(event: "notification_reminders_cancelled", parameters: ["count": cancelledCount])
+            }
         } catch {
             statusMessage = AppError.wrap(error, fallback: "Unable to sign out.").errorDescription ?? ""
         }
@@ -196,6 +204,10 @@ final class SettingsViewModel: ObservableObject {
         do {
             try await backendFunctionService.deleteUserAccount(UserJobRequestPayload(userID: profile.id))
             try await authService.signOut()
+            let cancelledCount = await notificationService.cancelReminderNotifications()
+            if cancelledCount > 0 {
+                analyticsService.track(event: "notification_reminders_cancelled", parameters: ["count": cancelledCount])
+            }
         } catch {
             statusMessage = AppError.wrap(error, fallback: "Unable to delete the account.").errorDescription ?? ""
         }

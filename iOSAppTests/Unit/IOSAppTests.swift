@@ -232,6 +232,7 @@ private final class TestGoalService: GoalServicing {
 private final class TestAuthService: AuthServicing {
     var currentUserID: String?
     var profile: UserProfile?
+    var authStates: [UserProfile?]?
     private(set) var didSignOut = false
 
     init(currentUserID: String? = nil, profile: UserProfile? = nil) {
@@ -241,7 +242,9 @@ private final class TestAuthService: AuthServicing {
 
     func authStateStream() -> AsyncStream<UserProfile?> {
         AsyncStream { continuation in
-            continuation.yield(profile)
+            for state in authStates ?? [profile] {
+                continuation.yield(state)
+            }
             continuation.finish()
         }
     }
@@ -340,6 +343,9 @@ private final class TestNotificationService: NotificationServicing {
     var authorizationResult: NotificationPermissionState = .authorized
     private(set) var scheduledRules = [ReminderRule]()
     private(set) var syncedRuleSets = [[ReminderRule]]()
+    private(set) var cancelledReminderCounts = [Int]()
+    private(set) var clearedRemoteTokenUserIDs = [String]()
+    var shouldClearRemoteToken = true
 
     func requestAuthorization() async throws -> NotificationPermissionState {
         state = authorizationResult
@@ -363,6 +369,18 @@ private final class TestNotificationService: NotificationServicing {
         let enabledRules = rules.filter(\.enabled)
         scheduledRules = enabledRules
         return enabledRules.count
+    }
+
+    func cancelReminderNotifications() async -> Int {
+        let count = scheduledRules.count
+        scheduledRules.removeAll()
+        cancelledReminderCounts.append(count)
+        return count
+    }
+
+    func clearRemoteToken(for userID: String) async -> Bool {
+        clearedRemoteTokenUserIDs.append(userID)
+        return shouldClearRemoteToken
     }
 
     func updateRemoteToken(_ token: String) {}
@@ -1427,6 +1445,52 @@ struct IOSAppTests {
         #expect(notificationService.scheduledRules.isEmpty)
     }
 
+    @Test func appSessionCancelsReminderNotificationsWhenAuthStateIsSignedOut() async throws {
+        let profile = testProfile(id: uniqueUserID("session-signed-out-reminders"))
+        let notificationService = TestNotificationService()
+        try await notificationService.schedule(rule: ReminderRule.defaultRules[0])
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: nil, profile: nil),
+            userService: TestUserService(profile: profile),
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService,
+            notificationService: notificationService
+        )
+
+        _ = AppSessionViewModel(container: container)
+        for _ in 0..<20 where notificationService.cancelledReminderCounts.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(notificationService.cancelledReminderCounts == [1])
+        #expect(notificationService.scheduledRules.isEmpty)
+        #expect(analyticsService.events.contains("notification_reminders_cancelled"))
+    }
+
+    @Test func appSessionClearsRemoteTokenWhenSignedInUserLeavesAuthState() async throws {
+        let profile = testProfile(id: uniqueUserID("session-remote-token"))
+        let authService = TestAuthService(currentUserID: profile.id, profile: profile)
+        authService.authStates = [profile, nil]
+        let notificationService = TestNotificationService()
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: authService,
+            userService: TestUserService(profile: profile),
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService,
+            notificationService: notificationService
+        )
+
+        _ = AppSessionViewModel(container: container)
+        for _ in 0..<50 where notificationService.clearedRemoteTokenUserIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(notificationService.clearedRemoteTokenUserIDs == [profile.id])
+        #expect(analyticsService.events.contains("notification_remote_token_cleared"))
+    }
+
     @Test func appSessionShowsRetryableUserContextErrorInsteadOfCompletingOnboardingOnLoadFailure() async throws {
         let profile = testProfile(id: uniqueUserID("session-context-failure"))
         let userService = TestUserService(profile: profile)
@@ -1602,25 +1666,58 @@ struct IOSAppTests {
         #expect(viewModel.statusMessage == "Choose where to save your data export.")
     }
 
-    @Test func settingsViewModelDeletesAccountThroughBackendThenSignsOut() async {
-        let profile = testProfile(id: uniqueUserID("settings-delete"))
+    @Test func settingsViewModelCancelsReminderNotificationsAfterSignOut() async throws {
+        let profile = testProfile(id: uniqueUserID("settings-sign-out-reminders"))
         let authService = TestAuthService(currentUserID: profile.id)
-        let backendService = TestBackendFunctionService()
+        let notificationService = TestNotificationService()
+        try await notificationService.schedule(rule: ReminderRule.defaultRules[0])
+        let analyticsService = TestAnalyticsService()
         let viewModel = SettingsViewModel(
             user: profile,
             authService: authService,
             userService: TestUserService(profile: profile),
             calendarSyncService: TestCalendarSyncService(),
-            notificationService: TestNotificationService(),
+            notificationService: notificationService,
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: analyticsService
+        )
+
+        await viewModel.signOut()
+
+        #expect(authService.didSignOut)
+        #expect(notificationService.clearedRemoteTokenUserIDs == [profile.id])
+        #expect(notificationService.cancelledReminderCounts == [1])
+        #expect(notificationService.scheduledRules.isEmpty)
+        #expect(analyticsService.events.contains("notification_remote_token_cleared"))
+        #expect(analyticsService.events.contains("notification_reminders_cancelled"))
+    }
+
+    @Test func settingsViewModelDeletesAccountThroughBackendThenSignsOut() async {
+        let profile = testProfile(id: uniqueUserID("settings-delete"))
+        let authService = TestAuthService(currentUserID: profile.id)
+        let backendService = TestBackendFunctionService()
+        let notificationService = TestNotificationService()
+        try? await notificationService.schedule(rule: ReminderRule.defaultRules[0])
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: authService,
+            userService: TestUserService(profile: profile),
+            calendarSyncService: TestCalendarSyncService(),
+            notificationService: notificationService,
             subscriptionService: TestSubscriptionService(),
             backendFunctionService: backendService,
-            analyticsService: TestAnalyticsService()
+            analyticsService: analyticsService
         )
 
         await viewModel.deleteAccount()
 
         #expect(backendService.deletedUserIDs == [profile.id])
         #expect(authService.didSignOut)
+        #expect(notificationService.cancelledReminderCounts == [1])
+        #expect(notificationService.scheduledRules.isEmpty)
+        #expect(analyticsService.events.contains("notification_reminders_cancelled"))
         #expect(!viewModel.isDeletingAccount)
         #expect(viewModel.statusMessage.isEmpty)
     }

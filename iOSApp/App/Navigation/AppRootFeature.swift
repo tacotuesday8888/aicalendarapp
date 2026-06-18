@@ -126,6 +126,7 @@ final class AppSessionViewModel: ObservableObject {
         subscriptionTask = nil
 
         let authTask = Task {
+            var lastAuthenticatedUserID: String?
             for await profile in container.authService.authStateStream() {
                 authState = .loaded(profile)
 
@@ -137,9 +138,12 @@ final class AppSessionViewModel: ObservableObject {
                     subscriptionTask?.cancel()
                     subscriptionTask = nil
                     await container.subscriptionService.unlinkUser()
+                    await clearAccountExitNotifications(for: lastAuthenticatedUserID)
+                    lastAuthenticatedUserID = nil
                     continue
                 }
 
+                lastAuthenticatedUserID = profile.id
                 isLoadingUserContext = true
                 userContextLoadError = nil
                 onboardingState = OnboardingState()
@@ -190,6 +194,20 @@ final class AppSessionViewModel: ObservableObject {
             }
         } catch {
             container.analyticsService.record(error: error, context: "notification_reminder_sync")
+        }
+    }
+
+    private func clearAccountExitNotifications(for userID: String?) async {
+        if let userID {
+            let clearedToken = await container.notificationService.clearRemoteToken(for: userID)
+            if clearedToken {
+                container.analyticsService.track(event: "notification_remote_token_cleared")
+            }
+        }
+
+        let cancelledCount = await container.notificationService.cancelReminderNotifications()
+        if cancelledCount > 0 {
+            container.analyticsService.track(event: "notification_reminders_cancelled", parameters: ["count": cancelledCount])
         }
     }
 }
