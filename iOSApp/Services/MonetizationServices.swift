@@ -37,17 +37,32 @@ actor LocalSubscriptionStore {
 
 actor LinkedSubscriptionIdentityStore {
     private var linkedUserID: String?
+    private var pendingUserID: String?
 
-    func link(_ userID: String) -> Bool {
-        let alreadyLinked = linkedUserID == userID
-        linkedUserID = userID
-        return alreadyLinked
+    func isLinked(to userID: String) -> Bool {
+        linkedUserID == userID
     }
 
-    func unlink() -> Bool {
-        let wasLinked = linkedUserID != nil
+    func hasKnownUser() -> Bool {
+        linkedUserID != nil || pendingUserID != nil
+    }
+
+    func markPending(_ userID: String) {
+        pendingUserID = userID
+    }
+
+    func markLinked(_ userID: String) {
+        linkedUserID = userID
+        pendingUserID = nil
+    }
+
+    func currentLinkedUserID() -> String? {
+        linkedUserID
+    }
+
+    func markUnlinked() {
         linkedUserID = nil
-        return wasLinked
+        pendingUserID = nil
     }
 }
 
@@ -172,45 +187,72 @@ final class SubscriptionService: SubscriptionServicing {
     }
 
     func linkUser(_ userID: String) async {
-        let alreadyLinked = await identityStore.link(userID)
-        guard !alreadyLinked else { return }
+        let currentLinkedUserID = await identityStore.currentLinkedUserID()
+        guard currentLinkedUserID != userID else { return }
 
         #if canImport(RevenueCat)
         guard Purchases.isConfigured else {
             logger.notice("linkUser called before RevenueCat was configured; skipping.")
             identifySuperwallUser(userID)
+            await identityStore.markPending(userID)
             return
         }
         do {
+            let revenueCatUserID = Purchases.shared.appUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+            if revenueCatUserID == userID {
+                identifySuperwallUser(userID)
+                await identityStore.markLinked(userID)
+                return
+            }
+
+            let isSwitchingUser = currentLinkedUserID != nil || !Purchases.shared.isAnonymous
             let result = try await Purchases.shared.logIn(userID)
+            if isSwitchingUser {
+                resetSuperwallUser()
+            }
             identifySuperwallUser(userID)
+            await identityStore.markLinked(userID)
             analyticsService?.track(event: "subscription_user_linked", parameters: [
-                "created": result.created
+                "created": result.created,
+                "switched": isSwitchingUser
             ])
         } catch {
             analyticsService?.record(error: error, context: "subscription_link_user")
         }
+        #else
+        identifySuperwallUser(userID)
+        await identityStore.markLinked(userID)
         #endif
     }
 
     func unlinkUser() async {
-        let wasLinked = await identityStore.unlink()
-        guard wasLinked else { return }
+        let hasKnownUser = await identityStore.hasKnownUser()
+        guard hasKnownUser else { return }
 
         #if canImport(RevenueCat)
         guard Purchases.isConfigured else {
             resetSuperwallUser()
+            await identityStore.markUnlinked()
             return
         }
         do {
+            guard !Purchases.shared.isAnonymous else {
+                resetSuperwallUser()
+                await identityStore.markUnlinked()
+                return
+            }
+
             _ = try await Purchases.shared.logOut()
             resetSuperwallUser()
+            await identityStore.markUnlinked()
             analyticsService?.track(event: "subscription_user_unlinked")
         } catch {
+            resetSuperwallUser()
             analyticsService?.record(error: error, context: "subscription_unlink_user")
         }
         #else
         resetSuperwallUser()
+        await identityStore.markUnlinked()
         #endif
     }
 

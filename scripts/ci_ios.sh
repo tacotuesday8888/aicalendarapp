@@ -11,7 +11,21 @@ DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$WORK_ROOT/DerivedData}"
 SOURCE_PACKAGES_PATH="${SOURCE_PACKAGES_PATH:-$WORK_ROOT/SourcePackages}"
 RESULT_BUNDLE_PATH="${RESULT_BUNDLE_PATH:-$WORK_ROOT/aicalendarapp.xcresult}"
 PACKAGE_CACHE_PATH="${PACKAGE_CACHE_PATH:-$WORK_ROOT/PackageCache}"
-PACKAGE_RESOLUTION_TIMEOUT_SECONDS="${PACKAGE_RESOLUTION_TIMEOUT_SECONDS:-300}"
+if [[ -z "${PACKAGE_RESOLUTION_TIMEOUT_SECONDS:-}" ]]; then
+  if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    PACKAGE_RESOLUTION_TIMEOUT_SECONDS=300
+  else
+    PACKAGE_RESOLUTION_TIMEOUT_SECONDS=900
+  fi
+fi
+
+if [[ -z "${RESET_IOS_CI_PACKAGES:-}" ]]; then
+  if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    RESET_IOS_CI_PACKAGES=true
+  else
+    RESET_IOS_CI_PACKAGES=false
+  fi
+fi
 
 created_simulator=""
 
@@ -153,8 +167,9 @@ rm -rf "$RESULT_BUNDLE_PATH"
 echo "Xcode version:"
 xcodebuild -version
 echo "Package cache path: $PACKAGE_CACHE_PATH"
+echo "Package resolution timeout: ${PACKAGE_RESOLUTION_TIMEOUT_SECONDS}s; reset packages: $RESET_IOS_CI_PACKAGES"
 
-if [[ "${RESET_IOS_CI_PACKAGES:-true}" == "true" ]]; then
+if [[ "$RESET_IOS_CI_PACKAGES" == "true" ]]; then
   clear_package_resolution_state
 fi
 
