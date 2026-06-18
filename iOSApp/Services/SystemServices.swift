@@ -46,6 +46,10 @@ final class NotificationService: NotificationServicing {
     private let logger = AppLogger(category: "notifications")
     private var remoteToken: String?
     private var authStateTask: Task<Void, Never>?
+    private static let reminderTypeUserInfoKey = "aicalendar_notification_type"
+    private static let reminderRuleIDUserInfoKey = "aicalendar_reminder_rule_id"
+    private static let checkInReminderType = "check_in_reminder"
+    private static let checkInReminderBody = "Take a minute to keep your plan aligned."
 
     func requestAuthorization() async throws -> NotificationPermissionState {
         let granted = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
@@ -88,8 +92,13 @@ final class NotificationService: NotificationServicing {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
         let content = UNMutableNotificationContent()
         content.title = rule.title
-        content.body = "Take a minute to keep your plan aligned."
+        content.body = Self.checkInReminderBody
         content.sound = .default
+        content.userInfo = [
+            Self.reminderTypeUserInfoKey: Self.checkInReminderType,
+            Self.reminderRuleIDUserInfoKey: rule.id,
+            "target": rule.target
+        ]
 
         let request = UNNotificationRequest(identifier: rule.id, content: content, trigger: trigger)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -101,6 +110,46 @@ final class NotificationService: NotificationServicing {
                 }
             }
         }
+    }
+
+    func syncReminderRules(_ rules: [ReminderRule]) async throws -> Int {
+        let state = await currentSettings()
+        guard state == .authorized || state == .provisional else {
+            return 0
+        }
+
+        let currentRuleIDs = Set(rules.map(\.id))
+        let pendingRequests = await pendingNotificationRequests()
+        let staleReminderIDs = pendingRequests.compactMap { request -> String? in
+            Self.shouldRemovePendingReminderRequest(
+                identifier: request.identifier,
+                userInfo: request.content.userInfo,
+                body: request.content.body,
+                currentRuleIDs: currentRuleIDs
+            ) ? request.identifier : nil
+        }
+
+        if !staleReminderIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: staleReminderIDs)
+        }
+
+        let enabledRules = rules.filter(\.enabled)
+        for rule in enabledRules {
+            try await schedule(rule: rule)
+        }
+        return enabledRules.count
+    }
+
+    static func shouldRemovePendingReminderRequest(
+        identifier: String,
+        userInfo: [AnyHashable: Any],
+        body: String,
+        currentRuleIDs: Set<String>
+    ) -> Bool {
+        let isMarkedCheckInReminder = userInfo[reminderTypeUserInfoKey] as? String == checkInReminderType
+        let isCurrentRule = currentRuleIDs.contains(identifier)
+        let isLegacyCheckInReminder = body == checkInReminderBody
+        return isMarkedCheckInReminder || isCurrentRule || isLegacyCheckInReminder
     }
 
     func updateRemoteToken(_ token: String) {
@@ -132,6 +181,14 @@ final class NotificationService: NotificationServicing {
                 logger.info("Persisted remote push token for \(userID).")
             } catch {
                 logger.error("Failed to persist remote push token: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func pendingNotificationRequests() async -> [UNNotificationRequest] {
+        await withCheckedContinuation { continuation in
+            center.getPendingNotificationRequests { requests in
+                continuation.resume(returning: requests)
             }
         }
     }

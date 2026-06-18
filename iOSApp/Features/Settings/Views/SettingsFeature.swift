@@ -88,7 +88,18 @@ final class SettingsViewModel: ObservableObject {
 
         do {
             notificationState = try await notificationService.requestAuthorization()
-            statusMessage = "Notifications are \(notificationState.rawValue)."
+            if notificationState == .authorized || notificationState == .provisional {
+                let onboardingState = try await userService.fetchOnboardingState(for: profile.id)
+                let scheduledCount = try await notificationService.syncReminderRules(onboardingState.reminderRules)
+                let reminderLabel = scheduledCount == 1 ? "reminder" : "reminders"
+                statusMessage = scheduledCount == 0
+                    ? "Notifications are \(notificationState.rawValue). No reminder rules are enabled."
+                    : "Notifications are \(notificationState.rawValue). \(scheduledCount) \(reminderLabel) scheduled."
+                analyticsService.track(event: "notification_reminders_scheduled", parameters: ["count": scheduledCount])
+            } else {
+                statusMessage = "Notifications are \(notificationState.rawValue)."
+                analyticsService.track(event: "notification_permission_denied")
+            }
         } catch {
             statusMessage = AppError.wrap(error, fallback: "Unable to update notifications.").errorDescription ?? ""
         }
@@ -101,15 +112,19 @@ final class SettingsViewModel: ObservableObject {
         defer { isSyncingCalendars = false }
 
         do {
-            profile.selectedCalendarIDs = Array(selectedCalendarIDs).sorted()
-            try await userService.saveProfile(profile)
+            let selectedIDs = Array(selectedCalendarIDs).sorted()
 
-            guard !profile.selectedCalendarIDs.isEmpty else {
-                statusMessage = "Apple Calendar disconnected. Existing imported blocks were left in place."
+            guard !selectedIDs.isEmpty else {
+                try await calendarSyncService.disconnectCalendars(for: profile.id)
+                profile.selectedCalendarIDs = []
+                try await userService.saveProfile(profile)
+                statusMessage = "Apple Calendar disconnected and imported blocks were removed."
                 analyticsService.track(event: "calendar_sync_disconnected")
                 return
             }
 
+            profile.selectedCalendarIDs = selectedIDs
+            try await userService.saveProfile(profile)
             _ = try await calendarSyncService.importSelectedCalendars(profile.selectedCalendarIDs, for: profile.id)
             statusMessage = "Calendar import refreshed."
             analyticsService.track(event: "calendar_sync_imported", parameters: ["count": profile.selectedCalendarIDs.count])

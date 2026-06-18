@@ -57,6 +57,9 @@ final class AppSessionViewModel: ObservableObject {
             try await container.userService.saveProfile(profile)
             try await container.userService.saveOnboardingState(onboarding, for: profile.id)
             onboardingState = onboarding
+            if onboarding.isComplete {
+                await syncReminderRulesIfNeeded(onboarding.reminderRules)
+            }
             await refreshSubscription()
             if subscriptionState.requiresPaywall {
                 pendingRoute = .paywall(trigger: .onboardingComplete)
@@ -112,6 +115,9 @@ final class AppSessionViewModel: ObservableObject {
 
         do {
             onboardingState = try await container.userService.fetchOnboardingState(for: profile.id)
+            if onboardingState.isComplete {
+                await syncReminderRulesIfNeeded(onboardingState.reminderRules)
+            }
             await refreshSubscription()
         } catch {
             onboardingState = OnboardingState()
@@ -126,6 +132,17 @@ final class AppSessionViewModel: ObservableObject {
             for await state in container.subscriptionService.observeSubscriptionState(for: userID) {
                 subscriptionState = state
             }
+        }
+    }
+
+    private func syncReminderRulesIfNeeded(_ rules: [ReminderRule]) async {
+        do {
+            let scheduledCount = try await container.notificationService.syncReminderRules(rules)
+            if scheduledCount > 0 {
+                container.analyticsService.track(event: "notification_reminders_synced", parameters: ["count": scheduledCount])
+            }
+        } catch {
+            container.analyticsService.record(error: error, context: "notification_reminder_sync")
         }
     }
 }

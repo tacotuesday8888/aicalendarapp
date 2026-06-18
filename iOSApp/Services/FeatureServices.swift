@@ -261,7 +261,7 @@ final class CalendarSyncService: CalendarSyncServicing {
         }
 
         let importedIDs = Set(blocks.map(\.id))
-        let selectedCalendarPrefixes = Set(selectedCalendarIDs.map { "apple-\($0)-" })
+        let selectedCalendarPrefixes = Set(selectedCalendarIDs.map { Self.importedCalendarPrefix(for: $0) })
         let databaseService = try requiredDatabaseService(databaseService)
         let existingBlocks = try await databaseService.fetchAll(PlannerBlock.self, from: .plannerBlocks, userID: userID)
 
@@ -279,13 +279,58 @@ final class CalendarSyncService: CalendarSyncServicing {
         return blocks
     }
 
-    private func importedPlannerBlockID(for event: EKEvent) -> String {
-        let eventIdentifier = event.eventIdentifier ?? event.calendarItemIdentifier
-        let rawIdentifier = "apple-\(event.calendar.calendarIdentifier)-\(eventIdentifier)"
-        return rawIdentifier
+    func disconnectCalendars(for userID: String) async throws {
+        let databaseService = try requiredDatabaseService(databaseService)
+        let existingBlocks = try await databaseService.fetchAll(PlannerBlock.self, from: .plannerBlocks, userID: userID)
+
+        for block in existingBlocks where block.source == .appleCalendar {
+            try await databaseService.delete(from: .plannerBlocks, id: block.id, userID: userID)
+        }
+    }
+
+    func importedPlannerBlockID(for event: EKEvent) -> String {
+        let occurrenceDate = event.occurrenceDate
+        let isRecurring = event.hasRecurrenceRules || occurrenceDate != nil
+        return Self.importedPlannerBlockID(
+            calendarIdentifier: event.calendar.calendarIdentifier,
+            externalIdentifier: event.calendarItemExternalIdentifier,
+            localIdentifier: event.eventIdentifier ?? event.calendarItemIdentifier,
+            occurrenceDate: occurrenceDate ?? (event.hasRecurrenceRules ? event.startDate : nil),
+            isRecurring: isRecurring
+        )
+    }
+
+    static func importedPlannerBlockID(
+        calendarIdentifier: String,
+        externalIdentifier: String?,
+        localIdentifier: String?,
+        occurrenceDate: Date?,
+        isRecurring: Bool
+    ) -> String {
+        let stableEventIdentifier = firstNonBlank(externalIdentifier, localIdentifier) ?? "unknown"
+        let rawIdentifier = if isRecurring {
+            "apple-\(calendarIdentifier)-\(stableEventIdentifier)-\(occurrenceDate.map { ISO8601DateFormatter.appJSON.string(from: $0) } ?? "undated")"
+        } else {
+            "apple-\(calendarIdentifier)-\(stableEventIdentifier)"
+        }
+        return sanitizedImportedIdentifier(rawIdentifier)
+    }
+
+    static func importedCalendarPrefix(for calendarIdentifier: String) -> String {
+        sanitizedImportedIdentifier("apple-\(calendarIdentifier)-")
+    }
+
+    private static func sanitizedImportedIdentifier(_ rawIdentifier: String) -> String {
+        rawIdentifier
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
             .replacingOccurrences(of: " ", with: "_")
+    }
+
+    private static func firstNonBlank(_ values: String?...) -> String? {
+        values
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
     }
 }
 

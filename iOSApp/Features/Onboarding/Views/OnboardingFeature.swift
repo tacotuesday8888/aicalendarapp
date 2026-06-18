@@ -102,10 +102,8 @@ final class OnboardingViewModel: ObservableObject {
     func requestNotifications() async {
         do {
             permissionState = try await notificationService.requestAuthorization()
-            if permissionState == .authorized {
-                for rule in state.reminderRules where rule.enabled {
-                    try await notificationService.schedule(rule: rule)
-                }
+            if permissionState == .authorized || permissionState == .provisional {
+                _ = try await notificationService.syncReminderRules(state.reminderRules)
             }
         } catch {
             errorMessage = AppError.wrap(error, fallback: "Unable to configure notifications.").errorDescription
