@@ -84,7 +84,7 @@ npm --prefix backend/functions run lint
 npm --prefix backend/functions run typecheck:scripts
 npm --prefix backend/functions run build
 AI_PROVIDER=stub npm --prefix backend/functions run ai:smoke
-LIVE_SMOKE_DRY_RUN=true FUNCTIONS_BASE_URL=https://example.invalid/functions npm --prefix backend/functions run functions:live-smoke
+LIVE_SMOKE_DRY_RUN=true LIVE_SMOKE_INCLUDE_PREMIUM_AI=true FUNCTIONS_BASE_URL=https://example.invalid/functions npm --prefix backend/functions run functions:live-smoke
 PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" npm --prefix backend/functions run rules:test
 bash scripts/ci_ios.sh
 ```
@@ -96,9 +96,42 @@ Live smoke tests need a deployed Functions base URL, disposable Firebase ID toke
 ```bash
 FUNCTIONS_BASE_URL=https://<region>-<project-id>.cloudfunctions.net \
 FIREBASE_ID_TOKEN=<disposable-test-id-token> \
+SMOKE_USER_ID=<disposable-test-user-uid> \
 FIREBASE_APP_CHECK_TOKEN=<debug-or-app-attest-token-if-enforced> \
 npm --prefix backend/functions run functions:live-smoke
 ```
+
+`FIREBASE_APP_CHECK_TOKEN` is required only after `APP_CHECK_MODE=enforce`; while App Check is in monitor mode, the smoke script warns when it is omitted.
+
+The default live smoke matrix checks non-destructive backend health: vibe feedback, RevenueCat subscription sync, and data export. After the disposable test user has premium access through RevenueCat or the Functions runtime variable `BETA_PRO_USER_IDS`, also run the premium AI matrix:
+
+```bash
+FUNCTIONS_BASE_URL=https://<region>-<project-id>.cloudfunctions.net \
+FIREBASE_ID_TOKEN=<disposable-premium-test-id-token> \
+FIREBASE_APP_CHECK_TOKEN=<debug-or-app-attest-token-if-enforced> \
+SMOKE_USER_ID=<disposable-premium-test-user-uid> \
+LIVE_SMOKE_INCLUDE_PREMIUM_AI=true \
+npm --prefix backend/functions run functions:live-smoke
+```
+
+Before running the premium matrix against the deployed backend, confirm the deployed Functions environment has live AI enabled:
+
+```text
+AI_PROVIDER=vertex
+AI_MODEL=gemini-3.1-flash-lite
+AI_VERTEX_LOCATION=global
+AI_ENABLE_STUB_FALLBACK=false
+```
+
+For beta allowlist testing, also set:
+
+```text
+BETA_PRO_USER_IDS=<same disposable Firebase UID as SMOKE_USER_ID>
+```
+
+If using a real RevenueCat sandbox/test entitlement instead, `BETA_PRO_USER_IDS` can be omitted, but the disposable user must sync as `entitlement=active` before the AI calls run.
+
+This intentionally creates AI usage records plus assistant, goal-plan, and syllabus-import review draft documents for the disposable user, then verifies those documents through `exportUserData`. The script expects new premium AI usage records with `provider=vertex` and `model=gemini-3.1-flash-lite`; override those checks only when deliberately smoke-testing a different model with `SMOKE_EXPECTED_AI_PROVIDER` and `SMOKE_EXPECTED_AI_MODEL`. If it fails with a premium or permission error, confirm the ID token belongs to `SMOKE_USER_ID`, the user has an active RevenueCat entitlement or is listed in `BETA_PRO_USER_IDS`, and App Check is still in monitor mode or the provided token is valid.
 
 ## Remaining External Blockers
 

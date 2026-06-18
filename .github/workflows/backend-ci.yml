@@ -82,6 +82,7 @@ jobs:
         run: npm run functions:live-smoke
         env:
           LIVE_SMOKE_DRY_RUN: "true"
+          LIVE_SMOKE_INCLUDE_PREMIUM_AI: "true"
           FUNCTIONS_BASE_URL: "https://example.invalid/functions"
 
       - name: Run Firebase rules behavior tests
