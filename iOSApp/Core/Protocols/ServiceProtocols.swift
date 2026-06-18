@@ -36,6 +36,7 @@ protocol CalendarSyncServicing: AnyObject {
     func requestAccess() async throws -> Bool
     func availableCalendars() async throws -> [SyncLink]
     func importSelectedCalendars(_ selectedCalendarIDs: [String], for userID: String) async throws -> [PlannerBlock]
+    func disconnectCalendars(for userID: String) async throws
 }
 
 protocol StudySessionServicing: AnyObject {
@@ -94,6 +95,7 @@ protocol NotificationServicing: AnyObject {
     func requestAuthorization() async throws -> NotificationPermissionState
     func currentSettings() async -> NotificationPermissionState
     func schedule(rule: ReminderRule) async throws
+    func syncReminderRules(_ rules: [ReminderRule]) async throws -> Int
     func updateRemoteToken(_ token: String)
 }
 

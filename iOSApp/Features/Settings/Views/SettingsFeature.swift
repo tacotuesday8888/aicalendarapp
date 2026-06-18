@@ -88,7 +88,18 @@ final class SettingsViewModel: ObservableObject {
 
         do {
             notificationState = try await notificationService.requestAuthorization()
-            statusMessage = "Notifications are \(notificationState.rawValue)."
+            if notificationState == .authorized || notificationState == .provisional {
+                let onboardingState = try await userService.fetchOnboardingState(for: profile.id)
+                let scheduledCount = try await notificationService.syncReminderRules(onboardingState.reminderRules)
+                let reminderLabel = scheduledCount == 1 ? "reminder" : "reminders"
+                statusMessage = scheduledCount == 0
+                    ? "Notifications are \(notificationState.rawValue). No reminder rules are enabled."
+                    : "Notifications are \(notificationState.rawValue). \(scheduledCount) \(reminderLabel) scheduled."
+                analyticsService.track(event: "notification_reminders_scheduled", parameters: ["count": scheduledCount])
+            } else {
+                statusMessage = "Notifications are \(notificationState.rawValue)."
+                analyticsService.track(event: "notification_permission_denied")
+            }
         } catch {
             statusMessage = AppError.wrap(error, fallback: "Unable to update notifications.").errorDescription ?? ""
         }
@@ -105,7 +116,8 @@ final class SettingsViewModel: ObservableObject {
             try await userService.saveProfile(profile)
 
             guard !profile.selectedCalendarIDs.isEmpty else {
-                statusMessage = "Apple Calendar disconnected. Existing imported blocks were left in place."
+                try await calendarSyncService.disconnectCalendars(for: profile.id)
+                statusMessage = "Apple Calendar disconnected and imported blocks were removed."
                 analyticsService.track(event: "calendar_sync_disconnected")
                 return
             }

@@ -260,12 +260,15 @@ private final class TestUserService: UserServicing {
         onboardingState
     }
 
-    func saveOnboardingState(_ state: OnboardingState, for userID: String) async throws {}
+    func saveOnboardingState(_ state: OnboardingState, for userID: String) async throws {
+        onboardingState = state
+    }
 }
 
 private final class TestCalendarSyncService: CalendarSyncServicing {
     var calendars = [SyncLink]()
     private(set) var importedCalendarIDs = [[String]]()
+    private(set) var disconnectedUserIDs = [String]()
 
     func requestAccess() async throws -> Bool {
         true
@@ -279,14 +282,20 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
         importedCalendarIDs.append(selectedCalendarIDs)
         return []
     }
+
+    func disconnectCalendars(for userID: String) async throws {
+        disconnectedUserIDs.append(userID)
+    }
 }
 
 private final class TestNotificationService: NotificationServicing {
     var state: NotificationPermissionState = .unknown
+    var authorizationResult: NotificationPermissionState = .authorized
     private(set) var scheduledRules = [ReminderRule]()
+    private(set) var syncedRuleSets = [[ReminderRule]]()
 
     func requestAuthorization() async throws -> NotificationPermissionState {
-        state = .authorized
+        state = authorizationResult
         return state
     }
 
@@ -296,6 +305,17 @@ private final class TestNotificationService: NotificationServicing {
 
     func schedule(rule: ReminderRule) async throws {
         scheduledRules.append(rule)
+    }
+
+    func syncReminderRules(_ rules: [ReminderRule]) async throws -> Int {
+        syncedRuleSets.append(rules)
+        guard state == .authorized || state == .provisional else {
+            return 0
+        }
+
+        let enabledRules = rules.filter(\.enabled)
+        scheduledRules = enabledRules
+        return enabledRules.count
     }
 
     func updateRemoteToken(_ token: String) {}
@@ -437,7 +457,8 @@ struct IOSAppTests {
         authService: AuthServicing,
         userService: UserServicing,
         subscriptionService: SubscriptionServicing,
-        analyticsService: AnalyticsServicing = TestAnalyticsService()
+        analyticsService: AnalyticsServicing = TestAnalyticsService(),
+        notificationService: NotificationServicing = TestNotificationService()
     ) -> AppContainer {
         AppContainer(
             configuration: .shared,
@@ -453,7 +474,7 @@ struct IOSAppTests {
             backendFunctionService: TestBackendFunctionService(),
             aiBackendService: AIBackendService(configuration: .shared),
             syllabusImportService: SyllabusImportService.shared,
-            notificationService: TestNotificationService(),
+            notificationService: notificationService,
             subscriptionService: subscriptionService,
             paywallService: TestPaywallService(),
             databaseService: TestDatabaseService(),
@@ -1145,6 +1166,92 @@ struct IOSAppTests {
         #expect(viewModel.subscriptionState.entitlement == .active)
     }
 
+    @Test func appSessionSyncsSavedReminderRulesAfterUserContextLoads() async throws {
+        let profile = testProfile(id: uniqueUserID("session-reminders"))
+        var onboarding = OnboardingState()
+        onboarding.didCompleteProfile = true
+        onboarding.completedAt = Date(timeIntervalSince1970: 1_777_000_000)
+        onboarding.reminderRules = [
+            ReminderRule(title: "Morning check-in", hour: 8, minute: 0, target: CheckInMoment.morning.rawValue),
+            ReminderRule(title: "Disabled night check-in", hour: 20, minute: 30, target: CheckInMoment.night.rawValue, enabled: false)
+        ]
+        let userService = TestUserService(profile: profile)
+        userService.onboardingState = onboarding
+        let notificationService = TestNotificationService()
+        notificationService.state = .authorized
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService,
+            notificationService: notificationService
+        )
+
+        let viewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where notificationService.syncedRuleSets.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(viewModel.onboardingState.isComplete)
+        #expect(notificationService.syncedRuleSets.first?.map(\.title) == ["Morning check-in", "Disabled night check-in"])
+        #expect(notificationService.scheduledRules.map(\.title) == ["Morning check-in"])
+        #expect(analyticsService.events.contains("notification_reminders_synced"))
+    }
+
+    @Test func appSessionDoesNotScheduleReminderRulesWhenNotificationsAreUnavailable() async throws {
+        let profile = testProfile(id: uniqueUserID("session-reminders-denied"))
+        var onboarding = OnboardingState()
+        onboarding.didCompleteProfile = true
+        onboarding.completedAt = Date(timeIntervalSince1970: 1_777_000_000)
+        onboarding.reminderRules = ReminderRule.defaultRules
+        let userService = TestUserService(profile: profile)
+        userService.onboardingState = onboarding
+        let notificationService = TestNotificationService()
+        notificationService.state = .denied
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService,
+            notificationService: notificationService
+        )
+
+        _ = AppSessionViewModel(container: container)
+        for _ in 0..<20 where notificationService.syncedRuleSets.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(notificationService.syncedRuleSets.first?.count == ReminderRule.defaultRules.count)
+        #expect(notificationService.scheduledRules.isEmpty)
+        #expect(!analyticsService.events.contains("notification_reminders_synced"))
+    }
+
+    @Test func appSessionDoesNotSyncReminderRulesBeforeOnboardingCompletes() async throws {
+        let profile = testProfile(id: uniqueUserID("session-reminders-incomplete"))
+        let userService = TestUserService(profile: profile)
+        userService.onboardingState = OnboardingState()
+        let notificationService = TestNotificationService()
+        notificationService.state = .authorized
+        let subscriptionService = TestSubscriptionService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: subscriptionService,
+            notificationService: notificationService
+        )
+
+        let viewModel = AppSessionViewModel(container: container)
+        for _ in 0..<20 where subscriptionService.refreshedUserIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        #expect(!viewModel.onboardingState.isComplete)
+        #expect(notificationService.syncedRuleSets.isEmpty)
+        #expect(notificationService.scheduledRules.isEmpty)
+    }
+
     @Test func settingsViewModelPreparesExportDocumentFromBackendPayload() async throws {
         let profile = testProfile(id: uniqueUserID("settings-export"))
         let backendService = TestBackendFunctionService()
@@ -1223,6 +1330,183 @@ struct IOSAppTests {
         #expect(subscriptionService.restoredUserIDs == [profile.id])
         #expect(viewModel.statusMessage == "Purchases restored.")
         #expect(!viewModel.isRestoringPurchases)
+    }
+
+    @Test func settingsViewModelSchedulesEnabledRemindersAfterNotificationAuthorization() async {
+        let profile = testProfile(id: uniqueUserID("settings-reminders"))
+        let userService = TestUserService(profile: profile)
+        userService.onboardingState.reminderRules = [
+            ReminderRule(title: "Morning check-in", hour: 8, minute: 0, target: CheckInMoment.morning.rawValue),
+            ReminderRule(title: "Disabled night check-in", hour: 20, minute: 30, target: CheckInMoment.night.rawValue, enabled: false)
+        ]
+        let notificationService = TestNotificationService()
+        notificationService.authorizationResult = .authorized
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: userService,
+            calendarSyncService: TestCalendarSyncService(),
+            notificationService: notificationService,
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: analyticsService
+        )
+
+        await viewModel.requestNotifications()
+
+        #expect(viewModel.notificationState == .authorized)
+        #expect(notificationService.scheduledRules.map(\.title) == ["Morning check-in"])
+        #expect(viewModel.statusMessage == "Notifications are authorized. 1 reminder scheduled.")
+        #expect(analyticsService.events.contains("notification_reminders_scheduled"))
+        #expect(!viewModel.isRequestingNotifications)
+    }
+
+    @Test func settingsViewModelDoesNotScheduleRemindersWhenNotificationsAreDenied() async {
+        let profile = testProfile(id: uniqueUserID("settings-reminders-denied"))
+        let notificationService = TestNotificationService()
+        notificationService.authorizationResult = .denied
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: TestUserService(profile: profile),
+            calendarSyncService: TestCalendarSyncService(),
+            notificationService: notificationService,
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: analyticsService
+        )
+
+        await viewModel.requestNotifications()
+
+        #expect(viewModel.notificationState == .denied)
+        #expect(notificationService.scheduledRules.isEmpty)
+        #expect(viewModel.statusMessage == "Notifications are denied.")
+        #expect(analyticsService.events.contains("notification_permission_denied"))
+    }
+
+    @Test func settingsViewModelDisconnectsCalendarsAndRemovesImportedBlocks() async {
+        var profile = testProfile(id: uniqueUserID("settings-calendar-disconnect"))
+        profile.selectedCalendarIDs = ["school"]
+        let calendarSyncService = TestCalendarSyncService()
+        let userService = TestUserService(profile: profile)
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: userService,
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            analyticsService: analyticsService
+        )
+        viewModel.selectedCalendarIDs = []
+
+        await viewModel.syncCalendars()
+
+        #expect(userService.savedProfiles.last?.selectedCalendarIDs == [])
+        #expect(calendarSyncService.disconnectedUserIDs == [profile.id])
+        #expect(calendarSyncService.importedCalendarIDs.isEmpty)
+        #expect(viewModel.statusMessage == "Apple Calendar disconnected and imported blocks were removed.")
+        #expect(analyticsService.events.contains("calendar_sync_disconnected"))
+    }
+
+    @Test func calendarDisconnectDeletesOnlyAppleCalendarPlannerBlocks() async throws {
+        let userID = uniqueUserID("calendar-disconnect")
+        let database = TestDatabaseService()
+        let service = CalendarSyncService()
+        service.databaseService = database
+        let start = Date(timeIntervalSince1970: 1_776_000_000)
+        let importedBlock = PlannerBlock(
+            id: "apple-school-event",
+            title: "Imported lecture",
+            detail: "From Apple Calendar",
+            startDate: start,
+            endDate: start.addingTimeInterval(60 * 60),
+            type: .classEvent,
+            source: .appleCalendar,
+            linkedGoalID: nil,
+            linkedAssignmentID: nil
+        )
+        let appBlock = PlannerBlock(
+            id: "app-study-block",
+            title: "Study block",
+            detail: "Created inside the app",
+            startDate: start.addingTimeInterval(2 * 60 * 60),
+            endDate: start.addingTimeInterval(3 * 60 * 60),
+            type: .studySession,
+            source: .app,
+            linkedGoalID: nil,
+            linkedAssignmentID: nil
+        )
+        try await database.save(importedBlock, in: .plannerBlocks, id: importedBlock.id, userID: userID)
+        try await database.save(appBlock, in: .plannerBlocks, id: appBlock.id, userID: userID)
+
+        try await service.disconnectCalendars(for: userID)
+
+        await #expect(throws: AppError.dataNotFound) {
+            try await database.fetch(PlannerBlock.self, from: .plannerBlocks, id: importedBlock.id, userID: userID)
+        }
+        let persistedAppBlock = try await database.fetch(PlannerBlock.self, from: .plannerBlocks, id: appBlock.id, userID: userID)
+        #expect(persistedAppBlock.title == "Study block")
+    }
+
+    @Test func importedCalendarBlockIDDistinguishesRecurringOccurrences() {
+        let firstOccurrence = Date(timeIntervalSince1970: 1_776_000_000)
+        let secondOccurrence = firstOccurrence.addingTimeInterval(7 * 24 * 60 * 60)
+
+        let firstID = CalendarSyncService.importedPlannerBlockID(
+            calendarIdentifier: "school/calendar",
+            externalIdentifier: "external-recurring-class",
+            localIdentifier: "local-event-1",
+            occurrenceDate: firstOccurrence
+        )
+        let secondID = CalendarSyncService.importedPlannerBlockID(
+            calendarIdentifier: "school/calendar",
+            externalIdentifier: "external-recurring-class",
+            localIdentifier: "local-event-1",
+            occurrenceDate: secondOccurrence
+        )
+
+        #expect(firstID != secondID)
+        #expect(firstID.contains("external-recurring-class"))
+        #expect(secondID.contains("external-recurring-class"))
+        #expect(!firstID.contains("/"))
+        #expect(!firstID.contains(":"))
+    }
+
+    @Test func importedCalendarBlockIDStaysStableWhenLocalEventIdentifierChanges() {
+        let occurrence = Date(timeIntervalSince1970: 1_776_000_000)
+
+        let originalID = CalendarSyncService.importedPlannerBlockID(
+            calendarIdentifier: "school",
+            externalIdentifier: "external-class-id",
+            localIdentifier: "local-event-before-sync",
+            occurrenceDate: occurrence
+        )
+        let syncedID = CalendarSyncService.importedPlannerBlockID(
+            calendarIdentifier: "school",
+            externalIdentifier: "external-class-id",
+            localIdentifier: "local-event-after-sync",
+            occurrenceDate: occurrence
+        )
+
+        #expect(originalID == syncedID)
+    }
+
+    @Test func importedCalendarPrefixUsesSameSanitizationAsImportedBlockIDs() {
+        let prefix = CalendarSyncService.importedCalendarPrefix(for: "school/calendar:primary")
+        let id = CalendarSyncService.importedPlannerBlockID(
+            calendarIdentifier: "school/calendar:primary",
+            externalIdentifier: "external-class-id",
+            localIdentifier: nil,
+            occurrenceDate: Date(timeIntervalSince1970: 1_776_000_000)
+        )
+
+        #expect(prefix == "apple-school_calendar_primary-")
+        #expect(id.hasPrefix(prefix))
     }
 
     @Test func paywallViewModelPrepareRegistersAndHandlesTrigger() async {
