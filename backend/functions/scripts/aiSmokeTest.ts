@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 
 import {
+  assertAIProviderRuntimeConfiguration,
   getAIModelName,
   getAIProviderMode,
   getAIVertexLocation,
+  isManagedFirebaseRuntime,
   isAIStubFallbackEnabled
 } from "../src/ai/config.js";
 import {
@@ -237,6 +239,23 @@ function assertAIConfigDefaults() {
     assert.equal(getAIModelName(), "custom-model");
     assert.equal(getAIVertexLocation(), "us");
     assert.equal(isAIStubFallbackEnabled(), true);
+    assert.equal(isManagedFirebaseRuntime(), false);
+    assert.doesNotThrow(() => assertAIProviderRuntimeConfiguration());
+
+    process.env.K_SERVICE = "ai-router";
+    assert.equal(isManagedFirebaseRuntime(), true);
+    assert.throws(
+      () => assertAIProviderRuntimeConfiguration(),
+      /AI_ENABLE_STUB_FALLBACK must be false/
+    );
+    process.env.AI_PROVIDER = "stub";
+    assert.throws(
+      () => assertAIProviderRuntimeConfiguration(),
+      /AI_PROVIDER must be vertex/
+    );
+    process.env.AI_PROVIDER = "vertex";
+    process.env.AI_ENABLE_STUB_FALLBACK = "false";
+    assert.doesNotThrow(() => assertAIProviderRuntimeConfiguration());
   } finally {
     restoreEnvValue("AI_PROVIDER", previousProvider);
     restoreEnvValue("AI_MODEL", previousModel);

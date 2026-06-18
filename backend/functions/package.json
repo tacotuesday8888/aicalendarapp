@@ -15,7 +15,9 @@
     "rules:test:run": "tsx scripts/rulesBehaviorTest.ts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "serve": "npx -y firebase-tools@15.21.0 emulators:start --only functions",
-    "deploy": "npx -y firebase-tools@15.21.0 deploy --only functions"
+    "deploy": "npx -y firebase-tools@15.21.0 deploy --only functions",
+    "deploy:backend": "cd ../.. && npx -y firebase-tools@15.21.0 deploy --only functions,firestore:rules,firestore:indexes,storage",
+    "audit:production": "npm audit --omit=dev --audit-level=moderate"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.37.0",

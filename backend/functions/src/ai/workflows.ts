@@ -1,7 +1,7 @@
 import { z } from "genkit";
 import { logger } from "firebase-functions/v2";
 
-import { getAIProviderMode, isAIStubFallbackEnabled } from "./config.js";
+import { assertAIProviderRuntimeConfiguration, getAIProviderMode, isAIStubFallbackEnabled } from "./config.js";
 import { configuredVertexModel, defaultGenerationConfig, genkitAI } from "./genkit.js";
 import { ASSISTANT_CHAT_SYSTEM_PROMPT } from "./prompts/assistant_chat.js";
 import { GOAL_PLAN_GENERATION_SYSTEM_PROMPT } from "./prompts/goal_plan_generation.js";
@@ -25,6 +25,8 @@ import { crisisSafetyFeedback, reviewVibeFeedbackForCrisis } from "./safety.js";
 
 const USER_INPUT_BEGIN = "<<<USER_INPUT_BEGIN>>>";
 const USER_INPUT_END = "<<<USER_INPUT_END>>>";
+
+assertAIProviderRuntimeConfiguration();
 
 if (getAIProviderMode() === "vertex" && isAIStubFallbackEnabled()) {
   logger.error("CRITICAL: AI stub fallback is enabled while Vertex AI is the configured provider.", {

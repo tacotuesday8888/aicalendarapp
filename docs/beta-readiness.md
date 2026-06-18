@@ -50,9 +50,17 @@ REVENUECAT_ENTITLEMENT_ID=aiefficiencyapp Pro
 2. Add the iOS app using the bundle ID from `iOSApp/Resources/Config/Release.xcconfig`.
 3. Download `GoogleService-Info.plist` and place it at `iOSApp/Resources/Config/GoogleService-Info.plist`.
 4. Enable Firebase Auth providers needed for beta: email/password, Apple, and Google.
-5. Deploy Firestore rules, Storage rules, indexes, and Functions only after local checks pass.
-6. Keep `APP_CHECK_MODE=monitor` until debug tokens and App Attest are verified in Firebase App Check. Move to `APP_CHECK_MODE=enforce` only after signed builds send valid App Check tokens.
-7. Production/TestFlight AI config must use:
+5. Deploy Firestore rules, Storage rules, indexes, and Functions only after local checks pass:
+
+```bash
+npm --prefix backend/functions run deploy:backend
+```
+
+Do not use a Functions-only deploy for beta unless rules and indexes have already been deployed from the same commit.
+
+6. Keep the custom Functions runtime variable `APP_CHECK_MODE=monitor` until debug tokens and App Attest are verified in Firebase App Check. Move to `APP_CHECK_MODE=enforce` only after signed builds send valid App Check tokens.
+7. Separately monitor and enable Firebase product-level App Check enforcement in the Firebase Console for each supported product that exposes enforcement controls, including Cloud Functions, Firestore, Storage, and Auth/Identity flows. The `APP_CHECK_MODE` variable only controls the app's custom HTTPS Functions guard; it does not enable product enforcement by itself.
+8. Production/TestFlight AI config must use:
 
 ```text
 AI_PROVIDER=vertex
@@ -89,7 +97,14 @@ PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" npm --prefix backend/functions run
 bash scripts/ci_ios.sh
 ```
 
-`npm --prefix backend/functions audit --omit=dev --audit-level=moderate` currently reports upstream Genkit/Firebase transitive OpenTelemetry and `uuid` advisories. Do not force `npm audit fix --force` without first confirming Firebase Functions and Genkit peer compatibility.
+Also run dependency-audit triage before beta/release work:
+
+```bash
+npm --prefix backend/functions run audit:production
+```
+
+This audit is currently expected to exit nonzero because it reports upstream Genkit/Firebase transitive OpenTelemetry and `uuid` advisories. Treat it as a tracked release-risk review, not a merge-blocking local verification check, until a compatible upstream fix or tested targeted override is available. Do not force `npm audit fix --force` without first confirming Firebase Functions and Genkit peer compatibility.
+As of June 18, 2026, the audit path is transitive through `genkit`, `@genkit-ai/google-genai`, `firebase-admin`, `firebase-functions`, OpenTelemetry packages, and nested `uuid` versions. `npm audit fix --force` proposes an unsafe breaking downgrade path, so this is tracked as upstream dependency risk until compatible Firebase/Genkit releases or tested targeted overrides are available.
 
 Live smoke tests need a deployed Functions base URL, disposable Firebase ID token, optional App Check token, and a disposable test user:
 
@@ -140,4 +155,5 @@ This intentionally creates AI usage records plus assistant, goal-plan, and sylla
 - RevenueCat products, entitlement, offering, API keys, and webhook secret.
 - Superwall project, API key, placements, and paywall configuration.
 - GitHub branch protection and CodeQL/CI results after the first public workflow run.
+- Existing public Git history includes older private planning/runbook documents that are no longer present in the current tree. The current tree is public-safe, but removing historical docs requires an explicit approved history rewrite or a fresh snapshot repository.
 - Designer UI handoff for final visual polish.

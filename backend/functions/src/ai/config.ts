@@ -41,15 +41,34 @@ export function getAIMaxOutputTokens(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_OUTPUT_TOKENS;
 }
 
-export function isAIStubFallbackEnabled(): boolean {
-  const rawValue = process.env.AI_ENABLE_STUB_FALLBACK?.trim().toLowerCase();
+export function isAIStubFallbackEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const rawValue = env.AI_ENABLE_STUB_FALLBACK?.trim().toLowerCase();
   return rawValue === "true" || rawValue === "1" || rawValue === "yes";
 }
 
-function requiresExplicitAIProvider(env: NodeJS.ProcessEnv): boolean {
+export function assertAIProviderRuntimeConfiguration(env: NodeJS.ProcessEnv = process.env): void {
+  if (!isManagedFirebaseRuntime(env)) {
+    return;
+  }
+
+  const provider = getAIProviderMode(env);
+  if (provider !== "vertex") {
+    throw new Error("AI_PROVIDER must be vertex in managed Firebase runtimes.");
+  }
+
+  if (isAIStubFallbackEnabled(env)) {
+    throw new Error("AI_ENABLE_STUB_FALLBACK must be false when AI_PROVIDER=vertex in managed Firebase runtimes.");
+  }
+}
+
+export function isManagedFirebaseRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.CI === "true" || env.FUNCTIONS_EMULATOR === "true") {
     return false;
   }
 
   return Boolean(env.K_SERVICE || env.GAE_SERVICE || env.FUNCTION_TARGET || env.FUNCTION_SIGNATURE_TYPE);
+}
+
+function requiresExplicitAIProvider(env: NodeJS.ProcessEnv): boolean {
+  return isManagedFirebaseRuntime(env);
 }
