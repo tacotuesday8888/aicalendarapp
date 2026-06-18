@@ -664,6 +664,13 @@ struct IOSAppTests {
         #expect(response.success)
     }
 
+    #if canImport(RevenueCat) && canImport(SuperwallKit)
+    @Test func revenueCatSuperwallPurchaseMapperTreatsCancellationAsCancelled() {
+        #expect(RevenueCatSuperwallPurchaseResultMapper.outcome(userCancelled: true) == .cancelled)
+        #expect(RevenueCatSuperwallPurchaseResultMapper.outcome(userCancelled: false) == .purchased)
+    }
+    #endif
+
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
         let service = GoalService()
         service.backendFunctionService = BackendFunctionService()
