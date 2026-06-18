@@ -45,6 +45,10 @@ import {
   deriveSnapshotFromSubscriberResponse,
   subscriptionSyncResponse
 } from "../src/billing/revenuecat.js";
+import {
+  firebaseMessagingErrorCode,
+  isInvalidPushTokenError
+} from "../src/notifications/dispatch.js";
 
 process.env.AI_PROVIDER = "stub";
 
@@ -53,6 +57,7 @@ async function runSmokeTest() {
   assertPromptContracts();
   assertUsagePolicy();
   assertSubscriptionSyncContract();
+  assertNotificationDispatchContract();
 
   const assistantInput = {
     userID: "smoke-test-user",
@@ -345,6 +350,16 @@ function assertSubscriptionSyncContract() {
       lastSyncedAt: "2026-04-26T12:00:00.000Z"
     }
   });
+}
+
+function assertNotificationDispatchContract() {
+  assert.equal(isInvalidPushTokenError({ code: "messaging/registration-token-not-registered" }), true);
+  assert.equal(isInvalidPushTokenError({ errorInfo: { code: "messaging/invalid-argument" } }), true);
+  assert.equal(isInvalidPushTokenError({ code: "messaging/unavailable" }), false);
+  assert.equal(isInvalidPushTokenError(new Error("network failed")), false);
+  assert.equal(firebaseMessagingErrorCode({ code: "messaging/invalid-registration-token" }), "messaging/invalid-registration-token");
+  assert.equal(firebaseMessagingErrorCode({ errorInfo: { code: "messaging/registration-token-not-registered" } }), "messaging/registration-token-not-registered");
+  assert.equal(firebaseMessagingErrorCode("messaging/invalid-argument"), null);
 }
 
 function assertUsagePolicy() {
