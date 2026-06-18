@@ -13,11 +13,13 @@ RESULT_BUNDLE_PATH="${RESULT_BUNDLE_PATH:-$WORK_ROOT/aicalendarapp.xcresult}"
 PACKAGE_CACHE_PATH="${PACKAGE_CACHE_PATH:-$WORK_ROOT/PackageCache}"
 if [[ -z "${PACKAGE_RESOLUTION_TIMEOUT_SECONDS:-}" ]]; then
   if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
-    PACKAGE_RESOLUTION_TIMEOUT_SECONDS=300
+    PACKAGE_RESOLUTION_TIMEOUT_SECONDS=900
   else
     PACKAGE_RESOLUTION_TIMEOUT_SECONDS=900
   fi
 fi
+
+PACKAGE_RESOLUTION_ATTEMPTS="${PACKAGE_RESOLUTION_ATTEMPTS:-2}"
 
 if [[ -z "${RESET_IOS_CI_PACKAGES:-}" ]]; then
   if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
@@ -167,7 +169,7 @@ rm -rf "$RESULT_BUNDLE_PATH"
 echo "Xcode version:"
 xcodebuild -version
 echo "Package cache path: $PACKAGE_CACHE_PATH"
-echo "Package resolution timeout: ${PACKAGE_RESOLUTION_TIMEOUT_SECONDS}s; reset packages: $RESET_IOS_CI_PACKAGES"
+echo "Package resolution timeout: ${PACKAGE_RESOLUTION_TIMEOUT_SECONDS}s; attempts: ${PACKAGE_RESOLUTION_ATTEMPTS}; reset packages: $RESET_IOS_CI_PACKAGES"
 
 if [[ "$RESET_IOS_CI_PACKAGES" == "true" ]]; then
   clear_package_resolution_state
@@ -185,7 +187,7 @@ resolve_packages() {
     -onlyUsePackageVersionsFromResolvedFile
 }
 
-run_package_resolution_with_retries 3 resolve_packages
+run_package_resolution_with_retries "$PACKAGE_RESOLUTION_ATTEMPTS" resolve_packages
 
 destination="${IOS_CI_DESTINATION:-}"
 if [[ -z "$destination" ]]; then
