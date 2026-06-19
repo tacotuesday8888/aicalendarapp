@@ -79,6 +79,20 @@ struct AppConfiguration: Sendable {
         }
     }
 
+    enum BackendEndpointValidation: Equatable, Sendable {
+        case valid
+        case missingRequiredURLs([String])
+
+        var failureReason: String? {
+            switch self {
+            case .valid:
+                return nil
+            case .missingRequiredURLs(let keys):
+                return "Backend endpoint URLs are required for non-debug builds: \(keys.joined(separator: ", "))."
+            }
+        }
+    }
+
     static let shared = AppConfiguration(bundle: .main)
 
     let bundleID: String
@@ -214,6 +228,17 @@ struct AppConfiguration: Sendable {
         let clientIDBody = String(clientID.dropLast(clientIDSuffix.count))
         let expectedReversedClientID = "\(reversedClientIDPrefix)\(clientIDBody)"
         return reversedClientID == expectedReversedClientID ? .valid : .mismatchedReversedClientID
+    }
+
+    static func validateBackendEndpoints(apiBaseURL: URL?, aiAPIBaseURL: URL?) -> BackendEndpointValidation {
+        var missingKeys = [String]()
+        if apiBaseURL == nil {
+            missingKeys.append("APIBaseURL")
+        }
+        if aiAPIBaseURL == nil {
+            missingKeys.append("AIAPIBaseURL")
+        }
+        return missingKeys.isEmpty ? .valid : .missingRequiredURLs(missingKeys)
     }
 
     private static func containsPlaceholderMarker(_ value: String) -> Bool {
