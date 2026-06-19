@@ -769,6 +769,44 @@ struct IOSAppTests {
     }
     #endif
 
+    @Test func revenueCatAPIKeyValidationAllowsIOSPublicSDKKey() {
+        #expect(
+            AppConfiguration.validateRevenueCatAPIKey("  appl_public_ios_key  ", allowsTestStoreKey: false) == .valid
+        )
+    }
+
+    @Test func revenueCatAPIKeyValidationAllowsTestStoreKeyOnlyWhenRequested() {
+        #expect(
+            AppConfiguration.validateRevenueCatAPIKey("test_local_store_key", allowsTestStoreKey: true) == .valid
+        )
+        #expect(
+            AppConfiguration.validateRevenueCatAPIKey(
+                "test_local_store_key",
+                allowsTestStoreKey: false
+            ) == .testStoreKeyNotAllowed
+        )
+    }
+
+    @Test func revenueCatAPIKeyValidationRejectsSecretsAndUnsupportedKeys() {
+        #expect(AppConfiguration.validateRevenueCatAPIKey("", allowsTestStoreKey: false) == .missing)
+        #expect(
+            AppConfiguration.validateRevenueCatAPIKey("sk_server_secret", allowsTestStoreKey: true) == .secretAPIKey
+        )
+        #expect(
+            AppConfiguration.validateRevenueCatAPIKey("atk_oauth_token", allowsTestStoreKey: true) == .oauthToken
+        )
+        #expect(
+            AppConfiguration.validateRevenueCatAPIKey("goog_android_public_key", allowsTestStoreKey: false)
+                == .unsupportedPublicSDKKey
+        )
+        #expect(
+            AppConfiguration.validateRevenueCatAPIKey(
+                "appl_your_revenuecat_ios_public_sdk_key",
+                allowsTestStoreKey: false
+            ) == .placeholderKey
+        )
+    }
+
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
         let service = GoalService()
         service.backendFunctionService = BackendFunctionService()
