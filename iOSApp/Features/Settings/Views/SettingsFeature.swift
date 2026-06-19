@@ -258,6 +258,7 @@ final class SettingsViewModel: ObservableObject {
 struct SettingsView: View {
     private let user: UserProfile
     private let container: AppContainer
+    private let configuration: AppConfiguration
     private let isPremiumLocked: Bool
     private let onRequirePremium: (PaywallTrigger) -> Void
     @StateObject private var viewModel: SettingsViewModel
@@ -265,11 +266,13 @@ struct SettingsView: View {
     init(
         user: UserProfile,
         container: AppContainer,
+        configuration: AppConfiguration = .shared,
         isPremiumLocked: Bool = false,
         onRequirePremium: @escaping (PaywallTrigger) -> Void = { _ in }
     ) {
         self.user = user
         self.container = container
+        self.configuration = configuration
         self.isPremiumLocked = isPremiumLocked
         self.onRequirePremium = onRequirePremium
         _viewModel = StateObject(wrappedValue: SettingsViewModel(
@@ -401,6 +404,17 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(viewModel.isExportingData || viewModel.isDeletingAccount)
+            }
+
+            if configuration.privacyPolicyURL != nil || configuration.termsOfServiceURL != nil {
+                Section("Legal") {
+                    if let privacyPolicyURL = configuration.privacyPolicyURL {
+                        Link("Privacy Policy", destination: privacyPolicyURL)
+                    }
+                    if let termsOfServiceURL = configuration.termsOfServiceURL {
+                        Link("Terms of Service", destination: termsOfServiceURL)
+                    }
+                }
             }
 
             Section("Account") {

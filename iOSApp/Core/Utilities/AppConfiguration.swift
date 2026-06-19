@@ -99,6 +99,26 @@ struct AppConfiguration: Sendable {
         }
     }
 
+    enum LegalURLValidation: Equatable, Sendable {
+        case valid
+        case missingRequiredURLs([String])
+        case placeholderURLs([String])
+        case unsupportedURLScheme([String])
+
+        var failureReason: String? {
+            switch self {
+            case .valid:
+                return nil
+            case .missingRequiredURLs(let keys):
+                return "Legal URLs are required for non-debug builds: \(keys.joined(separator: ", "))."
+            case .placeholderURLs(let keys):
+                return "Legal URLs must be replaced with publicly accessible policy URLs: \(keys.joined(separator: ", "))."
+            case .unsupportedURLScheme(let keys):
+                return "Legal URLs must use HTTPS: \(keys.joined(separator: ", "))."
+            }
+        }
+    }
+
     static let shared = AppConfiguration(bundle: .main)
 
     let bundleID: String
@@ -269,6 +289,57 @@ struct AppConfiguration: Sendable {
         return .valid
     }
 
+    static func validateLegalURLs(privacyPolicyURL: URL?, termsOfServiceURL: URL?) -> LegalURLValidation {
+        var missingKeys = [String]()
+        var placeholderKeys = [String]()
+        var unsupportedSchemeKeys = [String]()
+
+        validateRequiredHTTPSURL(
+            privacyPolicyURL,
+            key: "PrivacyPolicyURL",
+            missingKeys: &missingKeys,
+            placeholderKeys: &placeholderKeys,
+            unsupportedSchemeKeys: &unsupportedSchemeKeys
+        )
+        validateRequiredHTTPSURL(
+            termsOfServiceURL,
+            key: "TermsOfServiceURL",
+            missingKeys: &missingKeys,
+            placeholderKeys: &placeholderKeys,
+            unsupportedSchemeKeys: &unsupportedSchemeKeys
+        )
+
+        if !missingKeys.isEmpty {
+            return .missingRequiredURLs(missingKeys)
+        }
+        if !placeholderKeys.isEmpty {
+            return .placeholderURLs(placeholderKeys)
+        }
+        if !unsupportedSchemeKeys.isEmpty {
+            return .unsupportedURLScheme(unsupportedSchemeKeys)
+        }
+        return .valid
+    }
+
+    private static func validateRequiredHTTPSURL(
+        _ url: URL?,
+        key: String,
+        missingKeys: inout [String],
+        placeholderKeys: inout [String],
+        unsupportedSchemeKeys: inout [String]
+    ) {
+        guard let url else {
+            missingKeys.append(key)
+            return
+        }
+
+        if isPlaceholderWebURL(url) {
+            placeholderKeys.append(key)
+        } else if url.scheme?.lowercased() != "https" {
+            unsupportedSchemeKeys.append(key)
+        }
+    }
+
     private static func containsPlaceholderMarker(_ value: String) -> Bool {
         let lowercaseValue = value.lowercased()
         return lowercaseValue.contains("your_")
@@ -284,5 +355,13 @@ struct AppConfiguration: Sendable {
             || value.contains("your-project")
             || value.contains("your_project")
             || value.contains("example.")
+    }
+
+    private static func isPlaceholderWebURL(_ url: URL) -> Bool {
+        let value = url.absoluteString.lowercased()
+        return containsPlaceholderMarker(value)
+            || value.contains("example.")
+            || value.contains("your-domain")
+            || value.contains("your_domain")
     }
 }

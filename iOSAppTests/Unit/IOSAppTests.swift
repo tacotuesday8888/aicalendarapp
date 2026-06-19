@@ -942,6 +942,44 @@ struct IOSAppTests {
         )
     }
 
+    @Test func legalURLValidationRequiresPublicHTTPSURLs() {
+        let privacyURL = URL(string: "https://aicalendar.app/privacy")!
+        let termsURL = URL(string: "https://aicalendar.app/terms")!
+        let placeholderURL = URL(string: "https://example.com/privacy")!
+        let insecureURL = URL(string: "http://aicalendar.app/privacy")!
+
+        #expect(
+            AppConfiguration.validateLegalURLs(
+                privacyPolicyURL: privacyURL,
+                termsOfServiceURL: termsURL
+            ) == .valid
+        )
+        #expect(
+            AppConfiguration.validateLegalURLs(
+                privacyPolicyURL: nil,
+                termsOfServiceURL: termsURL
+            ) == .missingRequiredURLs(["PrivacyPolicyURL"])
+        )
+        #expect(
+            AppConfiguration.validateLegalURLs(
+                privacyPolicyURL: privacyURL,
+                termsOfServiceURL: nil
+            ) == .missingRequiredURLs(["TermsOfServiceURL"])
+        )
+        #expect(
+            AppConfiguration.validateLegalURLs(
+                privacyPolicyURL: placeholderURL,
+                termsOfServiceURL: termsURL
+            ) == .placeholderURLs(["PrivacyPolicyURL"])
+        )
+        #expect(
+            AppConfiguration.validateLegalURLs(
+                privacyPolicyURL: insecureURL,
+                termsOfServiceURL: termsURL
+            ) == .unsupportedURLScheme(["PrivacyPolicyURL"])
+        )
+    }
+
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
         let service = GoalService()
         service.backendFunctionService = BackendFunctionService()

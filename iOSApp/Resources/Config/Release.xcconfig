@@ -17,6 +17,7 @@ SUPERWALL_API_KEY =
 // Google Sign-In release builds require the iOS OAuth client ID and matching reversed client ID URL scheme.
 GOOGLE_CLIENT_ID =
 GOOGLE_REVERSED_CLIENT_ID =
+// Release builds require publicly accessible HTTPS legal URLs.
 PRIVACY_POLICY_URL =
 TERMS_OF_SERVICE_URL =
 #include? "Secrets.xcconfig"
