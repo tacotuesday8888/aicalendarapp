@@ -34,6 +34,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check public repository safety
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/check_public_repo_safety.sh
+
       - name: Detect backend-relevant changes
         id: changes
         shell: bash
