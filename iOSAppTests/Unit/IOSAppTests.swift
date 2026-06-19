@@ -762,6 +762,40 @@ struct IOSAppTests {
         #expect(response.success)
     }
 
+    @Test func networkServiceSurfacesBackendErrorMessage() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [TestURLProtocol.self]
+        let requestURL = URL(string: "https://example.invalid/functions/deleteUserAccount")!
+        let responseData = #"{"success":false,"error":"App Check is misconfigured."}"#.data(using: .utf8)!
+        TestURLProtocol.requestHandler = { request in
+            #expect(request.url == requestURL)
+            return (
+                HTTPURLResponse(url: requestURL, statusCode: 412, httpVersion: nil, headerFields: nil)!,
+                responseData
+            )
+        }
+        defer { TestURLProtocol.requestHandler = nil }
+
+        let service = NetworkService(session: URLSession(configuration: configuration))
+
+        do {
+            _ = try await service.request(
+                APIEndpoint(
+                    path: "deleteUserAccount",
+                    baseURL: URL(string: "https://example.invalid/functions")!,
+                    retryCount: 0
+                ),
+                decode: OperationStatusPayload.self
+            )
+            #expect(Bool(false))
+        } catch let error as AppError {
+            #expect(error.errorDescription?.contains("412") == true)
+            #expect(error.errorDescription?.contains("App Check is misconfigured.") == true)
+        } catch {
+            #expect(Bool(false))
+        }
+    }
+
     #if canImport(RevenueCat) && canImport(SuperwallKit)
     @Test func revenueCatSuperwallPurchaseMapperTreatsCancellationAsCancelled() {
         #expect(RevenueCatSuperwallPurchaseResultMapper.outcome(userCancelled: true) == .cancelled)

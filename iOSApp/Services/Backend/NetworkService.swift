@@ -93,22 +93,32 @@ final class NetworkService: NetworkServicing {
     }
 
     nonisolated private static func errorDescription(from data: Data, statusCode: Int) -> String {
-        guard let code = errorCode(from: data) else {
+        guard let detail = errorDetail(from: data) else {
             return "Request failed with status \(statusCode)."
         }
 
-        return "Request failed with status \(statusCode) (\(code))."
+        return "Request failed with status \(statusCode) (\(detail))."
     }
 
-    nonisolated private static func errorCode(from data: Data) -> String? {
+    nonisolated private static func errorDetail(from data: Data) -> String? {
         guard !data.isEmpty else { return nil }
 
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let error = object["error"] as? [String: Any],
-               let code = error["code"] as? String,
-               isSafeErrorCode(code)
-            {
-                return code
+            if let error = object["error"] as? String, let message = safeErrorMessage(error) {
+                return message
+            }
+
+            if let error = object["error"] as? [String: Any] {
+                if let message = error["message"] as? String, let safeMessage = safeErrorMessage(message) {
+                    return safeMessage
+                }
+                if let code = error["code"] as? String, isSafeErrorCode(code) {
+                    return code
+                }
+            }
+
+            if let message = object["message"] as? String, let safeMessage = safeErrorMessage(message) {
+                return safeMessage
             }
 
             if let code = object["code"] as? String, isSafeErrorCode(code) {
@@ -117,6 +127,13 @@ final class NetworkService: NetworkServicing {
         }
 
         return nil
+    }
+
+    nonisolated private static func safeErrorMessage(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 240 else { return nil }
+        guard trimmed.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+        return trimmed
     }
 
     nonisolated private static func isSafeErrorCode(_ value: String) -> Bool {
