@@ -13,7 +13,7 @@ report_failure() {
 
 tracked_path_matches() {
   local pattern="$1"
-  git ls-files | awk -v pattern="$pattern" '$0 ~ pattern { print }'
+  git ls-files | grep -E "$pattern" || true
 }
 
 check_forbidden_paths() {
