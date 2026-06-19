@@ -81,6 +81,12 @@ final class ImportsViewModel: ObservableObject {
 
     func commit(_ job: ImportJob) async throws {
         guard committingJobID == nil else { return }
+        guard canCommit(job) else {
+            let error = AppError.unknown("Import requires at least one course before it can be committed.")
+            errorMessage = error.errorDescription
+            throw error
+        }
+
         committingJobID = job.id
         defer { committingJobID = nil }
 
@@ -133,6 +139,10 @@ final class ImportsViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func canCommit(_ job: ImportJob) -> Bool {
+        job.status != .failed && !job.extractedCourses.isEmpty
     }
 }
 
@@ -204,7 +214,7 @@ struct ImportsFeature: View {
                         guard !requirePremiumIfLocked() else { return }
                         Task { try? await viewModel.commit(job) }
                     }
-                    .disabled(viewModel.committingJobID != nil)
+                    .disabled(viewModel.committingJobID != nil || !viewModel.canCommit(job))
 
                     Button("Review before commit") {
                         guard !requirePremiumIfLocked() else { return }
@@ -270,6 +280,9 @@ struct ImportsFeature: View {
             ) { updatedJob in
                 guard !requirePremiumIfLocked() else {
                     throw AppError.premiumRequired
+                }
+                guard viewModel.canCommit(updatedJob) else {
+                    throw AppError.unknown("Import requires at least one course before it can be committed.")
                 }
                 try await viewModel.commit(updatedJob)
             }

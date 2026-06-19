@@ -3123,6 +3123,32 @@ struct IOSAppTests {
         #expect(viewModel.committingJobID == nil)
     }
 
+    @Test func importsViewModelRejectsEmptyImportCommitBeforeBackendCall() async {
+        let profile = testProfile(id: uniqueUserID("imports-empty-commit"))
+        let importService = TestSyllabusImportService()
+        let viewModel = ImportsViewModel(
+            user: profile,
+            syllabusImportService: importService,
+            analyticsService: TestAnalyticsService()
+        )
+        let job = ImportJob(
+            sourceName: "empty-syllabus.txt",
+            status: .failed,
+            extractedCourses: [],
+            extractedAssignments: [],
+            warnings: ["No courses found."]
+        )
+
+        await #expect(throws: AppError.unknown("Import requires at least one course before it can be committed.")) {
+            try await viewModel.commit(job)
+        }
+
+        #expect(!viewModel.canCommit(job))
+        #expect(importService.committedJobs.isEmpty)
+        #expect(viewModel.errorMessage == "Import requires at least one course before it can be committed.")
+        #expect(viewModel.committingJobID == nil)
+    }
+
     @Test func syllabusImportServiceRejectsFilesAtStorageSizeLimitBeforeUpload() async throws {
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("oversized-syllabus-\(UUID().uuidString).txt")
