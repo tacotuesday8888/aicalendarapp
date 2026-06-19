@@ -53,7 +53,7 @@ jobs:
           fi
 
           printf '%s\n' "$changed_files"
-          if printf '%s\n' "$changed_files" | grep -Eq '^(iOSApp/|iOSAppTests/|iOSAppUITests/|aicalendarapp\.xcodeproj/|Package\.swift$|Package\.resolved$|scripts/ci_ios\.sh$|\.github/workflows/ios-ci\.yml$)'; then
+          if printf '%s\n' "$changed_files" | grep -Eq '^(Config/|iOSApp/|iOSAppTests/|iOSAppUITests/|aicalendarapp\.xcodeproj/|Package\.swift$|Package\.resolved$|scripts/ci_ios\.sh$|\.github/workflows/ios-ci\.yml$)'; then
             echo "ios_changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "ios_changed=false" >> "$GITHUB_OUTPUT"
