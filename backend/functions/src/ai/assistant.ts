@@ -21,6 +21,19 @@ type AssistantDraftRecord = {
   detail: string;
 };
 
+type AssistantDraftArtifactSnapshot = {
+  exists: boolean;
+  status: unknown;
+  data: unknown;
+};
+
+type AssistantDraftCommitDependencies = {
+  loadDraftArtifact: (draftID: string) => Promise<AssistantDraftArtifactSnapshot>;
+  applyDraftAction: (action: AssistantDraftRecord) => Promise<void>;
+  updateAssistantThreadAfterCommit: (action: AssistantDraftRecord) => Promise<void>;
+  markDraftConfirmed: (draftID: string) => Promise<void>;
+};
+
 export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchema, async ({ authUID, data, request }) => {
   logLegacyAIEndpointUse("assistantRespond", authUID, request);
   const userID = requireMatchingUser(authUID, data.userID);
@@ -140,29 +153,52 @@ function stringValue(value: unknown): string | undefined {
 }
 
 async function confirmDraftArtifact(userID: string, request: AssistantDraftCommitRequest) {
-  const draftRef = userScopedCollection(userID, "assistantDraftArtifacts").doc(request.action.id);
-  const snapshot = await draftRef.get();
+  await commitAssistantDraftRecord(request, {
+    loadDraftArtifact: async (draftID) => {
+      const snapshot = await userScopedCollection(userID, "assistantDraftArtifacts").doc(draftID).get();
+      return {
+        exists: snapshot.exists,
+        status: snapshot.get("status"),
+        data: snapshot.data()
+      };
+    },
+    applyDraftAction: async (action) => {
+      await applyDraftAction(userID, action);
+    },
+    updateAssistantThreadAfterCommit: async (action) => {
+      await updateAssistantThreadAfterCommit(userID, action);
+    },
+    markDraftConfirmed: async (draftID) => {
+      await userScopedCollection(userID, "assistantDraftArtifacts").doc(draftID).set(
+        {
+          status: "confirmed",
+          confirmedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    }
+  });
+}
+
+export async function commitAssistantDraftRecord(
+  request: AssistantDraftCommitRequest,
+  dependencies: AssistantDraftCommitDependencies
+) {
+  const snapshot = await dependencies.loadDraftArtifact(request.action.id);
 
   if (!snapshot.exists) {
     throw new HttpsError("not-found", "Draft artifact was not found.");
   }
 
-  if (snapshot.get("status") !== "pending") {
+  if (snapshot.status !== "pending") {
     throw new HttpsError("failed-precondition", "Draft artifact has already been handled.");
   }
 
-  const storedAction = assistantDraftRecordFromData(request.action.id, snapshot.data());
+  const storedAction = assistantDraftRecordFromData(request.action.id, snapshot.data);
 
-  await draftRef.set(
-    {
-      status: "confirmed",
-      confirmedAt: serverTimestamp()
-    },
-    { merge: true }
-  );
-
-  await applyDraftAction(userID, storedAction);
-  await updateAssistantThreadAfterCommit(userID, storedAction);
+  await dependencies.applyDraftAction(storedAction);
+  await dependencies.updateAssistantThreadAfterCommit(storedAction);
+  await dependencies.markDraftConfirmed(request.action.id);
 }
 
 function assistantDraftRecordFromData(id: string, data: unknown): AssistantDraftRecord {
