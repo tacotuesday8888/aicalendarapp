@@ -290,6 +290,8 @@ private final class TestUserService: UserServicing {
     var fetchOnboardingError: Error?
     var saveProfileError: Error?
     private(set) var savedProfiles = [UserProfile]()
+    private(set) var updatedPushTokens = [(userID: String, token: String)]()
+    private(set) var clearedPushTokens = [(userID: String, token: String)]()
 
     init(profile: UserProfile) {
         self.profile = profile
@@ -305,6 +307,24 @@ private final class TestUserService: UserServicing {
         }
         savedProfiles.append(profile)
         self.profile = profile
+    }
+
+    func updatePushToken(_ token: String, for userID: String) async throws {
+        if let saveProfileError {
+            throw saveProfileError
+        }
+        updatedPushTokens.append((userID: userID, token: token))
+        profile.pushToken = token
+    }
+
+    func clearPushToken(_ token: String, for userID: String) async throws -> Bool {
+        if let saveProfileError {
+            throw saveProfileError
+        }
+        guard profile.pushToken == token else { return false }
+        clearedPushTokens.append((userID: userID, token: token))
+        profile.pushToken = nil
+        return true
     }
 
     func fetchOnboardingState(for userID: String) async throws -> OnboardingState {
@@ -767,6 +787,36 @@ struct IOSAppTests {
         try await service.save(profile, in: .users, id: profile.id, userID: nil)
         let fetched = try await service.fetch(UserProfile.self, from: .users, id: profile.id, userID: nil)
         #expect(fetched.email == profile.email)
+    }
+
+    @Test func userServiceClearsPushTokenInLocalFallback() async throws {
+        let database = TestDatabaseService()
+        let service = UserService()
+        service.databaseService = database
+        var profile = testProfile(id: uniqueUserID("user-clear-token"))
+        profile.pushToken = "token-to-clear"
+        try await database.save(profile, in: .users, id: profile.id, userID: nil)
+
+        let cleared = try await service.clearPushToken("token-to-clear", for: profile.id)
+
+        let fetched = try await service.fetchProfile(for: profile.id)
+        #expect(cleared)
+        #expect(fetched.pushToken == nil)
+    }
+
+    @Test func userServiceDoesNotClearMismatchedPushTokenInLocalFallback() async throws {
+        let database = TestDatabaseService()
+        let service = UserService()
+        service.databaseService = database
+        var profile = testProfile(id: uniqueUserID("user-mismatched-token"))
+        profile.pushToken = "current-token"
+        try await database.save(profile, in: .users, id: profile.id, userID: nil)
+
+        let cleared = try await service.clearPushToken("old-token", for: profile.id)
+
+        let fetched = try await service.fetchProfile(for: profile.id)
+        #expect(!cleared)
+        #expect(fetched.pushToken == "current-token")
     }
 
     @Test func databaseServicePurgesLocalUserData() async throws {
@@ -1701,6 +1751,46 @@ struct IOSAppTests {
 
         #expect(notificationService.clearedRemoteTokenUserIDs == [profile.id])
         #expect(analyticsService.events.contains("notification_remote_token_cleared"))
+    }
+
+    @Test func notificationServiceClearsRemoteTokenThroughDedicatedUserServicePath() async throws {
+        var profile = testProfile(id: uniqueUserID("notification-clear-token"))
+        profile.pushToken = "fcm-token"
+        let userService = TestUserService(profile: profile)
+        let notificationService = NotificationService()
+        notificationService.userService = userService
+        notificationService.updateRemoteToken("fcm-token")
+
+        let cleared = await notificationService.clearRemoteToken(for: profile.id)
+
+        let clearedToken = try #require(userService.clearedPushTokens.first)
+        #expect(cleared)
+        #expect(userService.clearedPushTokens.count == 1)
+        #expect(clearedToken.userID == profile.id)
+        #expect(clearedToken.token == "fcm-token")
+        #expect(userService.savedProfiles.isEmpty)
+        #expect(userService.profile.pushToken == nil)
+    }
+
+    @Test func notificationServicePersistsRemoteTokenThroughDedicatedUserServicePath() async throws {
+        let profile = testProfile(id: uniqueUserID("notification-update-token"))
+        let userService = TestUserService(profile: profile)
+        let authService = TestAuthService(currentUserID: profile.id, profile: profile)
+        let notificationService = NotificationService()
+        notificationService.userService = userService
+        notificationService.authService = authService
+
+        notificationService.updateRemoteToken("new-fcm-token")
+        for _ in 0..<50 where userService.updatedPushTokens.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let updatedToken = try #require(userService.updatedPushTokens.first)
+        #expect(userService.updatedPushTokens.count == 1)
+        #expect(updatedToken.userID == profile.id)
+        #expect(updatedToken.token == "new-fcm-token")
+        #expect(userService.savedProfiles.isEmpty)
+        #expect(userService.profile.pushToken == "new-fcm-token")
     }
 
     @Test func appSessionShowsRetryableUserContextErrorInsteadOfCompletingOnboardingOnLoadFailure() async throws {
