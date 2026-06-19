@@ -246,6 +246,7 @@ private final class TestAuthService: AuthServicing {
     var currentUserID: String?
     var profile: UserProfile?
     var authStates: [UserProfile?]?
+    var signOutError: Error?
     private(set) var didSignOut = false
 
     init(currentUserID: String? = nil, profile: UserProfile? = nil) {
@@ -279,6 +280,9 @@ private final class TestAuthService: AuthServicing {
     }
 
     func signOut() async throws {
+        if let signOutError {
+            throw signOutError
+        }
         didSignOut = true
         currentUserID = nil
     }
@@ -2201,6 +2205,40 @@ struct IOSAppTests {
         #expect(analyticsService.events.contains("notification_local_account_notifications_cancelled"))
         #expect(!viewModel.isDeletingAccount)
         #expect(viewModel.statusMessage.isEmpty)
+    }
+
+    @Test func settingsViewModelCancelsLocalAccountNotificationsWhenDeleteSignOutFails() async {
+        let profile = testProfile(id: uniqueUserID("settings-delete-signout-failure"))
+        let authService = TestAuthService(currentUserID: profile.id)
+        authService.signOutError = AppError.network(description: "Sign-out failed.")
+        let backendService = TestBackendFunctionService()
+        let notificationService = TestNotificationService()
+        try? await notificationService.schedule(rule: ReminderRule.defaultRules[0])
+        notificationService.queuedSessionTimerCount = 1
+        let analyticsService = TestAnalyticsService()
+        let databaseService = TestDatabaseService()
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: authService,
+            userService: TestUserService(profile: profile),
+            calendarSyncService: TestCalendarSyncService(),
+            notificationService: notificationService,
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: backendService,
+            databaseService: databaseService,
+            analyticsService: analyticsService
+        )
+
+        await viewModel.deleteAccount()
+
+        #expect(backendService.deletedUserIDs == [profile.id])
+        #expect(databaseService.deletedLocalUserIDs == [profile.id])
+        #expect(!authService.didSignOut)
+        #expect(notificationService.cancelledLocalAccountNotificationCounts == [2])
+        #expect(notificationService.scheduledRules.isEmpty)
+        #expect(notificationService.queuedSessionTimerCount == 0)
+        #expect(analyticsService.events.contains("notification_local_account_notifications_cancelled"))
+        #expect(viewModel.statusMessage == "Sign-out failed.")
     }
 
     @Test func settingsViewModelRestorePurchasesUsesSubscriptionState() async {
