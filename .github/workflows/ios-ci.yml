@@ -24,6 +24,8 @@ jobs:
       SCHEME: aicalendarapp
       CONFIGURATION: Debug
       ONLY_TESTING: aicalendarappTests
+      RESET_IOS_CI_PACKAGES: "false"
+      DISABLE_IOS_CI_PACKAGE_REPOSITORY_CACHE: "false"
 
     steps:
       - name: Check out repository
@@ -61,8 +63,23 @@ jobs:
         if: steps.changes.outputs.ios_changed != 'true'
         run: echo "Skipping iOS checks; no iOS-relevant files changed."
 
+      - name: Restore SwiftPM package cache
+        if: steps.changes.outputs.ios_changed == 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build/ci-ios/PackageCache
+            .build/ci-ios/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-xcode26-swiftpm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode26-swiftpm-
+
       - name: Run simulator unit tests
         if: steps.changes.outputs.ios_changed == 'true'
+        env:
+          WORK_ROOT: ${{ github.workspace }}/.build/ci-ios
+          RESULT_BUNDLE_PATH: ${{ runner.temp }}/aicalendarapp.xcresult
         run: bash scripts/ci_ios.sh
 
       - name: Upload test result bundle
