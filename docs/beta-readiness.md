@@ -99,7 +99,7 @@ npm --prefix backend/functions run lint
 npm --prefix backend/functions run typecheck:scripts
 npm --prefix backend/functions run build
 AI_PROVIDER=stub npm --prefix backend/functions run ai:smoke
-LIVE_SMOKE_DRY_RUN=true LIVE_SMOKE_INCLUDE_PREMIUM_AI=true FUNCTIONS_BASE_URL=https://example.invalid/functions npm --prefix backend/functions run functions:live-smoke
+LIVE_SMOKE_DRY_RUN=true LIVE_SMOKE_INCLUDE_PREMIUM_AI=true LIVE_SMOKE_INCLUDE_TEST_PUSH=true FUNCTIONS_BASE_URL=https://example.invalid/functions npm --prefix backend/functions run functions:live-smoke
 PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" npm --prefix backend/functions run rules:test
 bash scripts/ci_ios.sh
 ```
