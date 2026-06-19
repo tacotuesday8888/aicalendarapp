@@ -168,7 +168,7 @@ struct PaywallView: View {
                             if !state.requiresPaywall {
                                 onUnlocked()
                             } else {
-                                viewModel.errorMessage = "Subscription is still inactive. Check your purchase status and try again."
+                                viewModel.errorMessage = "Purchase is processing. Restore purchases in a moment if Pro does not unlock automatically."
                             }
                         } catch {
                             viewModel.errorMessage = AppError.wrap(error, fallback: "Purchase failed.").errorDescription
@@ -186,7 +186,7 @@ struct PaywallView: View {
                             if !state.requiresPaywall {
                                 onUnlocked()
                             } else {
-                                viewModel.errorMessage = "Subscription is still inactive. Check your purchase status and try again."
+                                viewModel.errorMessage = "Purchase is processing. Restore purchases in a moment if Pro does not unlock automatically."
                             }
                         } catch {
                             viewModel.errorMessage = AppError.wrap(error, fallback: "Purchase failed.").errorDescription

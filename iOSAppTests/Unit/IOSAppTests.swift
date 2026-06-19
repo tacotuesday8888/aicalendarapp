@@ -404,6 +404,8 @@ private final class TestSubscriptionService: SubscriptionServicing {
     private(set) var restoredUserIDs = [String]()
     private(set) var refreshedUserIDs = [String]()
     private(set) var linkedUserIDs = [String]()
+    private(set) var preparedPaidAccessUserIDs = [String]()
+    private(set) var confirmedPaidAccessUserIDs = [String]()
     private(set) var didUnlinkUser = false
 
     func observeSubscriptionState(for userID: String) -> AsyncStream<SubscriptionState> {
@@ -439,6 +441,15 @@ private final class TestSubscriptionService: SubscriptionServicing {
     func unlinkUser() async {
         didUnlinkUser = true
     }
+
+    func prepareForPaidAccess(for userID: String) async throws {
+        preparedPaidAccessUserIDs.append(userID)
+    }
+
+    func confirmPaidAccess(for userID: String) async throws -> SubscriptionState {
+        confirmedPaidAccessUserIDs.append(userID)
+        return state
+    }
 }
 
 private final class TestPaywallService: PaywallServicing {
@@ -459,6 +470,7 @@ private final class TestPaywallService: PaywallServicing {
 private final class TestBackendFunctionService: BackendFunctionServicing {
     var exportResponse: ExportUserDataResponsePayload?
     var subscriptionState = SubscriptionState.locked
+    var subscriptionStateResponses = [SubscriptionState]()
     private(set) var deletedUserIDs = [String]()
     private(set) var exportedUserIDs = [String]()
     private(set) var syncedSubscriptionUserIDs = [String]()
@@ -487,6 +499,9 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
 
     func syncSubscriptionStatus(_ request: UserJobRequestPayload) async throws -> SubscriptionState {
         syncedSubscriptionUserIDs.append(request.userID)
+        if !subscriptionStateResponses.isEmpty {
+            return subscriptionStateResponses.removeFirst()
+        }
         return subscriptionState
     }
 
@@ -1390,6 +1405,64 @@ struct IOSAppTests {
         #expect(unlocked.paywallTrigger(for: .syllabusImport, honoringDebugBypass: false) == nil)
     }
 
+    @Test func subscriptionStateResolverRequiresBackendConfirmationForNewActiveAccess() {
+        let rawRevenueCatActive = SubscriptionState(
+            entitlement: .active,
+            activePlan: .annual,
+            trialEligible: false,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_777_000_000)
+        )
+        let backendInactive = SubscriptionState(
+            entitlement: .inactive,
+            activePlan: .none,
+            trialEligible: true,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_777_000_100)
+        )
+        let backendActive = SubscriptionState(
+            entitlement: .active,
+            activePlan: .annual,
+            trialEligible: false,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_777_000_200)
+        )
+        let previouslyConfirmedActive = SubscriptionState(
+            entitlement: .active,
+            activePlan: .monthly,
+            trialEligible: false,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_776_000_000)
+        )
+
+        let backendRejected = SubscriptionStateResolver.resolveBackendState(
+            backendState: backendInactive,
+            localState: rawRevenueCatActive,
+            previousState: .locked
+        )
+        let backendUnavailableForLockedUser = SubscriptionStateResolver.resolveBackendState(
+            backendState: nil,
+            localState: rawRevenueCatActive,
+            previousState: .locked
+        )
+        let backendUnavailableForPreviouslyActiveUser = SubscriptionStateResolver.resolveBackendState(
+            backendState: nil,
+            localState: rawRevenueCatActive,
+            previousState: previouslyConfirmedActive
+        )
+        let backendConfirmedActive = SubscriptionStateResolver.resolveBackendState(
+            backendState: backendActive,
+            localState: .locked,
+            previousState: .locked
+        )
+
+        #expect(backendRejected.entitlement == .inactive)
+        #expect(backendUnavailableForLockedUser.entitlement == .inactive)
+        #expect(backendUnavailableForPreviouslyActiveUser.entitlement == .active)
+        #expect(backendUnavailableForPreviouslyActiveUser.activePlan == .monthly)
+        #expect(backendConfirmedActive.entitlement == .active)
+        #expect(backendConfirmedActive.activePlan == .annual)
+        #expect(SubscriptionStateResolver.pendingPaidAccessState(previousState: .locked).entitlement == .inactive)
+        #expect(SubscriptionStateResolver.pendingPaidAccessState(previousState: previouslyConfirmedActive).entitlement == .active)
+        #expect(SubscriptionStateResolver.pendingPaidAccessState(previousState: previouslyConfirmedActive).activePlan == .monthly)
+    }
+
     @Test func subscriptionServiceRefreshUsesBackendBetaStateWhenRevenueCatIsUnavailable() async throws {
         let userID = uniqueUserID("subscription-beta")
         let backendService = TestBackendFunctionService()
@@ -1399,7 +1472,7 @@ struct IOSAppTests {
             trialEligible: false,
             lastSyncedAt: Date(timeIntervalSince1970: 1_777_204_800)
         )
-        let service = SubscriptionService()
+        let service = SubscriptionService(paidAccessConfirmationRetryDelaysNanoseconds: [])
         service.backendFunctionService = backendService
 
         let state = try await service.refreshStatus(for: userID)
@@ -1411,6 +1484,60 @@ struct IOSAppTests {
         #expect(state.activePlan == .none)
         #expect(state.trialEligible == false)
         #expect(observed?.entitlement == .active)
+    }
+
+    @Test func subscriptionServiceConfirmPaidAccessRequiresBackendActiveState() async throws {
+        let userID = uniqueUserID("subscription-confirm")
+        let backendService = TestBackendFunctionService()
+        backendService.subscriptionState = SubscriptionState(
+            entitlement: .active,
+            activePlan: .annual,
+            trialEligible: false,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_776_000_000)
+        )
+        let service = SubscriptionService(paidAccessConfirmationRetryDelaysNanoseconds: [])
+        service.backendFunctionService = backendService
+
+        let state = try await service.confirmPaidAccess(for: userID)
+
+        #expect(backendService.syncedSubscriptionUserIDs == [userID])
+        #expect(state.entitlement == .active)
+        #expect(state.activePlan == .annual)
+    }
+
+    @Test func subscriptionServiceConfirmPaidAccessRetriesUntilBackendBecomesActive() async throws {
+        let userID = uniqueUserID("subscription-confirm-retry")
+        let backendService = TestBackendFunctionService()
+        backendService.subscriptionStateResponses = [
+            .locked,
+            SubscriptionState(
+                entitlement: .active,
+                activePlan: .monthly,
+                trialEligible: false,
+                lastSyncedAt: Date(timeIntervalSince1970: 1_776_000_500)
+            )
+        ]
+        let service = SubscriptionService(paidAccessConfirmationRetryDelaysNanoseconds: [0])
+        service.backendFunctionService = backendService
+
+        let state = try await service.confirmPaidAccess(for: userID)
+
+        #expect(backendService.syncedSubscriptionUserIDs == [userID, userID])
+        #expect(state.entitlement == .active)
+        #expect(state.activePlan == .monthly)
+    }
+
+    @Test func subscriptionServiceConfirmPaidAccessRejectsInactiveBackendState() async {
+        let userID = uniqueUserID("subscription-confirm-inactive")
+        let backendService = TestBackendFunctionService()
+        backendService.subscriptionState = .locked
+        let service = SubscriptionService(paidAccessConfirmationRetryDelaysNanoseconds: [])
+        service.backendFunctionService = backendService
+
+        await #expect(throws: AppError.network(description: "Your purchase was processed, but Pro access has not been confirmed on the server yet. Try restoring purchases in a moment.")) {
+            _ = try await service.confirmPaidAccess(for: userID)
+        }
+        #expect(backendService.syncedSubscriptionUserIDs == [userID])
     }
 
     @Test func appSessionRefreshesSubscriptionAfterExistingUserContextLoads() async throws {

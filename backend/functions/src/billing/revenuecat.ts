@@ -55,6 +55,16 @@ type SubscriptionSyncResponse = {
   };
 };
 
+type SnapshotLookupOptions = {
+  requireFreshSnapshot?: boolean;
+};
+
+type RevenueCatWebhookSnapshotPlanItem = {
+  userID: string;
+  fallback: SubscriptionSnapshot;
+  requireFreshSnapshot: boolean;
+};
+
 const DEFAULT_REVENUECAT_ENTITLEMENT_ID = "aiefficiencyapp Pro";
 
 export function configuredRevenueCatEntitlementIDs(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -152,6 +162,39 @@ export function deriveBetaProSnapshot(userID: string, env: NodeJS.ProcessEnv = p
   };
 }
 
+export function requiresFreshSnapshotForTransferDestination(event: RevenueCatWebhookEvent, userID: string): boolean {
+  const transferredToUserIDs = uniqueUserIDs(Array.isArray(event.transferred_to) ? event.transferred_to : []);
+  return transferredToUserIDs.includes(userID.trim());
+}
+
+export function buildRevenueCatWebhookSnapshotPlan(event: RevenueCatWebhookEvent): RevenueCatWebhookSnapshotPlanItem[] {
+  const primaryUserIDs = uniqueUserIDs([
+    event.app_user_id,
+    event.original_app_user_id,
+    ...(Array.isArray(event.aliases) ? event.aliases : [])
+  ]);
+  const transferredFromUserIDs = uniqueUserIDs(Array.isArray(event.transferred_from) ? event.transferred_from : []);
+  const transferredToUserIDs = uniqueUserIDs(Array.isArray(event.transferred_to) ? event.transferred_to : []);
+
+  return [
+    ...primaryUserIDs.map((userID) => ({
+      userID,
+      fallback: deriveSnapshotFromEvent(event),
+      requireFreshSnapshot: false
+    })),
+    ...transferredToUserIDs.map((userID) => ({
+      userID,
+      fallback: deriveTransferDestinationSnapshot(event),
+      requireFreshSnapshot: requiresFreshSnapshotForTransferDestination(event, userID)
+    })),
+    ...transferredFromUserIDs.map((userID) => ({
+      userID,
+      fallback: deriveTransferSourceSnapshot(),
+      requireFreshSnapshot: false
+    }))
+  ];
+}
+
 function expirationTimestampForEntitlement(entitlement: RevenueCatSubscriberEntitlement): number {
   return parseIsoTimestamp(entitlement.expires_date) ?? Number.MAX_SAFE_INTEGER;
 }
@@ -220,7 +263,15 @@ async function persistSubscriptionSnapshot(
   event: RevenueCatWebhookEvent,
   eventID: string
 ): Promise<void> {
-  await userScopedCollection(userID, "subscriptions").doc("current").set({
+  await userScopedCollection(userID, "subscriptions").doc("current").set(subscriptionSnapshotWriteData(snapshot, event, eventID), { merge: true });
+}
+
+function subscriptionSnapshotWriteData(
+  snapshot: SubscriptionSnapshot,
+  event: RevenueCatWebhookEvent,
+  eventID: string
+): Record<string, unknown> {
+  return {
     entitlement: snapshot.entitlement,
     activePlan: appPlanFromProductID(snapshot.activePlan),
     entitlementIDs: snapshot.entitlementIDs,
@@ -231,7 +282,7 @@ async function persistSubscriptionSnapshot(
     revenueCatProductID: snapshot.activePlan !== "none" ? snapshot.activePlan : event.product_id ?? null,
     revenueCatStore: event.store ?? null,
     updatedAt: serverTimestamp()
-  }, { merge: true });
+  };
 }
 
 export function subscriptionSyncResponse(
@@ -334,18 +385,8 @@ export const revenueCatWebhook = onRequest({
     return;
   }
 
-  const primaryUserIDs = uniqueUserIDs([
-    event.app_user_id,
-    event.original_app_user_id,
-    ...(Array.isArray(event.aliases) ? event.aliases : [])
-  ]);
-  const transferredFromUserIDs = uniqueUserIDs(Array.isArray(event.transferred_from) ? event.transferred_from : []);
-  const transferredToUserIDs = uniqueUserIDs(Array.isArray(event.transferred_to) ? event.transferred_to : []);
-  const affectedUserIDs = uniqueUserIDs([
-    ...primaryUserIDs,
-    ...transferredFromUserIDs,
-    ...transferredToUserIDs
-  ]);
+  const snapshotPlan = buildRevenueCatWebhookSnapshotPlan(event);
+  const affectedUserIDs = uniqueUserIDs(snapshotPlan.map((item) => item.userID));
 
   if (affectedUserIDs.length === 0) {
     response.status(400).send({ success: false, reason: "Missing RevenueCat user identifiers." });
@@ -355,7 +396,11 @@ export const revenueCatWebhook = onRequest({
   const secretApiKey = process.env.REVENUECAT_SECRET_API_KEY?.trim();
   const snapshotCache = new Map<string, SubscriptionSnapshot>();
 
-  const snapshotFor = async (userID: string, fallback: SubscriptionSnapshot): Promise<SubscriptionSnapshot> => {
+  const snapshotFor = async (
+    userID: string,
+    fallback: SubscriptionSnapshot,
+    options: SnapshotLookupOptions = {}
+  ): Promise<SubscriptionSnapshot> => {
     const cached = snapshotCache.get(userID);
     if (cached) {
       return cached;
@@ -366,39 +411,72 @@ export const revenueCatWebhook = onRequest({
       try {
         snapshot = await fetchRevenueCatSubscriberSnapshot(userID, secretApiKey);
       } catch (error) {
-        logger.warn("RevenueCat subscriber lookup failed; falling back to webhook event payload.", {
+        logger.warn(options.requireFreshSnapshot
+          ? "RevenueCat subscriber lookup failed; transfer destination event will be retried."
+          : "RevenueCat subscriber lookup failed; falling back to webhook event payload.", {
           eventID,
           eventType,
           userID,
           error: error instanceof Error ? error.message : String(error)
         });
+        if (options.requireFreshSnapshot) {
+          throw new HttpsError(
+            "unavailable",
+            "RevenueCat subscriber lookup is required before processing transfer destination events."
+          );
+        }
       }
+    } else if (options.requireFreshSnapshot) {
+      throw new HttpsError(
+        "failed-precondition",
+        "REVENUECAT_SECRET_API_KEY is required before processing transfer destination events."
+      );
     }
 
     snapshotCache.set(userID, snapshot);
     return snapshot;
   };
 
-  const writes: Promise<void>[] = [];
-  for (const userID of primaryUserIDs) {
-    writes.push(snapshotFor(userID, deriveSnapshotFromEvent(event)).then((snapshot) => persistSubscriptionSnapshot(userID, snapshot, event, eventID)));
+  let resolvedSnapshots: Array<{ userID: string; snapshot: SubscriptionSnapshot }>;
+  try {
+    resolvedSnapshots = await Promise.all(snapshotPlan.map(async (item) => ({
+      userID: item.userID,
+      snapshot: await snapshotFor(item.userID, item.fallback, {
+        requireFreshSnapshot: item.requireFreshSnapshot
+      })
+    })));
+  } catch (error) {
+    logger.error("RevenueCat webhook could not persist a verified subscription snapshot.", {
+      eventID,
+      eventType,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    response.status(503).send({
+      success: false,
+      reason: "RevenueCat subscriber snapshot is required before this event can be processed."
+    });
+    return;
   }
 
-  for (const userID of transferredToUserIDs) {
-    writes.push(snapshotFor(userID, deriveTransferDestinationSnapshot(event)).then((snapshot) => persistSubscriptionSnapshot(userID, snapshot, event, eventID)));
+  const snapshotsByUserID = new Map<string, SubscriptionSnapshot>();
+  for (const item of resolvedSnapshots) {
+    snapshotsByUserID.set(item.userID, item.snapshot);
   }
 
-  for (const userID of transferredFromUserIDs) {
-    writes.push(snapshotFor(userID, deriveTransferSourceSnapshot()).then((snapshot) => persistSubscriptionSnapshot(userID, snapshot, event, eventID)));
+  const batch = db.batch();
+  for (const [userID, snapshot] of snapshotsByUserID) {
+    batch.set(
+      userScopedCollection(userID, "subscriptions").doc("current"),
+      subscriptionSnapshotWriteData(snapshot, event, eventID),
+      { merge: true }
+    );
   }
-
-  await Promise.all(writes);
-
-  await eventRef.set({
+  batch.set(eventRef, {
     type: eventType,
     userIDs: affectedUserIDs,
     receivedAt: serverTimestamp()
   });
+  await batch.commit();
 
   response.status(200).send({ success: true });
 });

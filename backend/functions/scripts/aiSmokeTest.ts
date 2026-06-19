@@ -39,10 +39,12 @@ import {
 } from "../src/ai/usagePolicy.js";
 import { needsCrisisSafetyResponse, reviewVibeFeedbackForCrisis } from "../src/ai/safety.js";
 import {
+  buildRevenueCatWebhookSnapshotPlan,
   configuredRevenueCatEntitlementIDs,
   deriveBetaProSnapshot,
   deriveSnapshotFromEvent,
   deriveSnapshotFromSubscriberResponse,
+  requiresFreshSnapshotForTransferDestination,
   subscriptionSyncResponse
 } from "../src/billing/revenuecat.js";
 import {
@@ -322,6 +324,47 @@ function assertSubscriptionSyncContract() {
     assert.equal(subscriberSnapshot.entitlement, "active");
     assert.deepEqual(subscriberSnapshot.entitlementIDs, ["pro"]);
     assert.equal(subscriberSnapshot.activePlan, "pro_annual");
+
+    const transferPlan = buildRevenueCatWebhookSnapshotPlan({
+      type: "TRANSFER",
+      transferred_from: ["old-uid"],
+      transferred_to: ["new-uid"]
+    });
+    assert.deepEqual(
+      transferPlan.map((item) => ({
+        userID: item.userID,
+        entitlement: item.fallback.entitlement,
+        requireFreshSnapshot: item.requireFreshSnapshot
+      })),
+      [
+        {
+          userID: "new-uid",
+          entitlement: "inactive",
+          requireFreshSnapshot: true
+        },
+        {
+          userID: "old-uid",
+          entitlement: "inactive",
+          requireFreshSnapshot: false
+        }
+      ]
+    );
+    assert.equal(
+      requiresFreshSnapshotForTransferDestination({
+        type: "TRANSFER",
+        transferred_from: ["old-uid"],
+        transferred_to: ["new-uid"]
+      }, "new-uid"),
+      true
+    );
+    assert.equal(
+      requiresFreshSnapshotForTransferDestination({
+        type: "TRANSFER",
+        transferred_from: ["old-uid"],
+        transferred_to: ["new-uid"]
+      }, "old-uid"),
+      false
+    );
   } finally {
     restoreEnvValue("REVENUECAT_ENTITLEMENT_ID", previousRevenueCatEntitlementID);
   }
