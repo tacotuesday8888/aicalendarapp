@@ -134,8 +134,15 @@ export const deleteImportJob = onAuthenticatedJsonRequest(deleteImportSchema, as
   if (uploadedFilePath) {
     try {
       await getStorage().bucket().file(uploadedFilePath).delete();
-    } catch {
-      // Ignore missing files so metadata cleanup can still complete.
+    } catch (error) {
+      if (!isMissingStorageObjectError(error)) {
+        logger.error("Import file deletion failed; keeping import metadata for retry.", {
+          userID,
+          importID: data.job.id,
+          uploadedFilePath
+        });
+        throw new HttpsError("internal", "Import file could not be deleted. Try again.");
+      }
     }
   } else if (importSnapshot.get("uploadedFilePath")) {
     logger.warn("Skipped import file deletion because stored path was outside the user import prefix.", {
@@ -332,7 +339,7 @@ function normalizedDateString(value: unknown): string | null {
   return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
 }
 
-function safeUserImportStoragePath(userID: string, value: unknown): string | null {
+export function safeUserImportStoragePath(userID: string, value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -340,4 +347,31 @@ function safeUserImportStoragePath(userID: string, value: unknown): string | nul
   const trimmed = value.trim().replace(/^\/+/, "");
   const prefix = `users/${userID}/imports/`;
   return trimmed.startsWith(prefix) ? trimmed : null;
+}
+
+export function isMissingStorageObjectError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const record = error as Record<string, unknown>;
+  const response = recordValue(record.response);
+  return (
+    isStatusCode(record.code, 404) ||
+    isStatusCode(record.status, 404) ||
+    isStatusCode(record.statusCode, 404) ||
+    isStatusCode(response.status, 404)
+  );
+}
+
+function isStatusCode(value: unknown, expectedCode: number): boolean {
+  if (typeof value === "number") {
+    return value === expectedCode;
+  }
+
+  if (typeof value === "string") {
+    return Number.parseInt(value, 10) === expectedCode;
+  }
+
+  return false;
 }

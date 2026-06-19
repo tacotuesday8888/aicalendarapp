@@ -59,6 +59,10 @@ import {
   firebaseMessagingErrorCode,
   isInvalidPushTokenError
 } from "../src/notifications/dispatch.js";
+import {
+  isMissingStorageObjectError,
+  safeUserImportStoragePath
+} from "../src/imports/syllabus.js";
 import { resolveAppCheckMode } from "../src/shared/appCheck.js";
 
 process.env.AI_PROVIDER = "stub";
@@ -74,6 +78,7 @@ async function runSmokeTest() {
   await assertAssistantDraftCommitContract();
   assertSubscriptionSyncContract();
   assertNotificationDispatchContract();
+  assertImportCleanupContract();
 
   const assistantInput = {
     userID: "smoke-test-user",
@@ -740,6 +745,28 @@ function assertNotificationDispatchContract() {
   assert.equal(firebaseMessagingErrorCode({ code: "messaging/invalid-registration-token" }), "messaging/invalid-registration-token");
   assert.equal(firebaseMessagingErrorCode({ errorInfo: { code: "messaging/registration-token-not-registered" } }), "messaging/registration-token-not-registered");
   assert.equal(firebaseMessagingErrorCode("messaging/invalid-argument"), null);
+}
+
+function assertImportCleanupContract() {
+  assert.equal(
+    safeUserImportStoragePath("student-1", "users/student-1/imports/syllabus.pdf"),
+    "users/student-1/imports/syllabus.pdf"
+  );
+  assert.equal(
+    safeUserImportStoragePath("student-1", " /users/student-1/imports/syllabus.pdf "),
+    "users/student-1/imports/syllabus.pdf"
+  );
+  assert.equal(safeUserImportStoragePath("student-1", "users/student-2/imports/syllabus.pdf"), null);
+  assert.equal(safeUserImportStoragePath("student-1", "users/student-1/profile.txt"), null);
+  assert.equal(safeUserImportStoragePath("student-1", null), null);
+
+  assert.equal(isMissingStorageObjectError({ code: 404 }), true);
+  assert.equal(isMissingStorageObjectError({ code: "404" }), true);
+  assert.equal(isMissingStorageObjectError({ status: 404 }), true);
+  assert.equal(isMissingStorageObjectError({ statusCode: 404 }), true);
+  assert.equal(isMissingStorageObjectError({ response: { status: 404 } }), true);
+  assert.equal(isMissingStorageObjectError({ code: 403 }), false);
+  assert.equal(isMissingStorageObjectError(new Error("Forbidden")), false);
 }
 
 function assertUsagePolicy() {

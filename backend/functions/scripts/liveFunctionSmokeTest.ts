@@ -249,6 +249,28 @@ function liveSmokeRequests(userID: string): SmokeRequest[] {
     assertResponse: (responseJSON) => assertExportUserDataResponse(responseJSON, userID, state)
   });
 
+  if (process.env.LIVE_SMOKE_INCLUDE_IMPORT_CLEANUP === "true") {
+    assert.equal(
+      state.premiumAIIncluded,
+      true,
+      "LIVE_SMOKE_INCLUDE_IMPORT_CLEANUP requires LIVE_SMOKE_INCLUDE_PREMIUM_AI=true so the smoke run creates an import job to delete."
+    );
+    requests.push({
+      name: "deleteImportJob syllabus_import cleanup",
+      path: "deleteImportJob",
+      bodyKeys: ["userID", "job"],
+      body: () => ({
+        userID,
+        job: {
+          id: requiredStateString(state.syllabusImportDraftID, "captured syllabus import draft ID")
+        }
+      }),
+      assertResponse: (responseJSON) => {
+        assertOperationStatusResponse(responseJSON, "deleteImportJob");
+      }
+    });
+  }
+
   if (process.env.LIVE_SMOKE_INCLUDE_DELETE_ACCOUNT === "true") {
     const confirmation = process.env.LIVE_SMOKE_CONFIRM_DELETE_ACCOUNT?.trim();
     assert.equal(
