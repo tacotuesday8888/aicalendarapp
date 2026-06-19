@@ -14,6 +14,7 @@ REVENUECAT_API_KEY =
 REVENUECAT_ENTITLEMENT_ID = aiefficiencyapp Pro
 // Superwall release builds require the public SDK API key from Settings > Keys (`pk_...`).
 SUPERWALL_API_KEY =
+// Google Sign-In release builds require the iOS OAuth client ID and matching reversed client ID URL scheme.
 GOOGLE_CLIENT_ID =
 GOOGLE_REVERSED_CLIENT_ID =
 PRIVACY_POLICY_URL =
