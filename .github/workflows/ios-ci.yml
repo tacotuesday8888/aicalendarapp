@@ -71,7 +71,7 @@ jobs:
             .build/ci-ios/PackageCache
             .build/ci-ios/SourcePackages
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-xcode26-swiftpm-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-xcode26-swiftpm-${{ hashFiles('Package.resolved', 'aicalendarapp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-xcode26-swiftpm-
 
