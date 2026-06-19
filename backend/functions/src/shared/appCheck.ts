@@ -6,7 +6,17 @@ import type { Request } from "express";
 type AppCheckMode = "off" | "monitor" | "enforce";
 
 export async function verifyAppCheckRequest(request: Request, routeName: string) {
-  const mode = appCheckMode();
+  let mode: AppCheckMode;
+  try {
+    mode = resolveAppCheckMode();
+  } catch (error) {
+    logger.error("App Check mode is misconfigured.", {
+      routeName,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw new HttpsError("failed-precondition", "App Check is misconfigured.");
+  }
+
   if (mode === "off") {
     return;
   }
@@ -25,8 +35,8 @@ export async function verifyAppCheckRequest(request: Request, routeName: string)
   }
 }
 
-function appCheckMode(): AppCheckMode {
-  const explicitMode = process.env.APP_CHECK_MODE?.trim().toLowerCase();
+export function resolveAppCheckMode(env: NodeJS.ProcessEnv = process.env): AppCheckMode {
+  const explicitMode = env.APP_CHECK_MODE?.trim().toLowerCase();
   if (explicitMode === "off" || explicitMode === "disabled" || explicitMode === "false") {
     return "off";
   }
@@ -36,8 +46,11 @@ function appCheckMode(): AppCheckMode {
   if (explicitMode === "monitor" || explicitMode === "warn") {
     return "monitor";
   }
+  if (explicitMode) {
+    throw new Error(`Unsupported APP_CHECK_MODE "${explicitMode}". Expected "off", "monitor", or "enforce".`);
+  }
 
-  const legacyEnforcement = process.env.APP_CHECK_ENFORCEMENT?.trim().toLowerCase();
+  const legacyEnforcement = env.APP_CHECK_ENFORCEMENT?.trim().toLowerCase();
   if (legacyEnforcement === "true" || legacyEnforcement === "1" || legacyEnforcement === "enforce") {
     return "enforce";
   }
