@@ -2387,6 +2387,37 @@ struct IOSAppTests {
         #expect(!viewModel.isLoading)
     }
 
+    @Test func onboardingCompletionRequiresAcademicFocusEvenWhenDisplayNameExists() async {
+        var profile = testProfile(id: uniqueUserID("onboarding-focus-required"))
+        profile.displayName = "Riley"
+        profile.academicFocus = ""
+        let userService = TestUserService(profile: profile)
+        let analyticsService = TestAnalyticsService()
+        let container = sessionContainer(
+            authService: TestAuthService(currentUserID: profile.id, profile: profile),
+            userService: userService,
+            subscriptionService: TestSubscriptionService(),
+            analyticsService: analyticsService
+        )
+        let sessionViewModel = AppSessionViewModel(container: container)
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: TestCalendarSyncService(),
+            syllabusImportService: SyllabusImportService.shared,
+            analyticsService: analyticsService,
+            notificationService: TestNotificationService()
+        )
+
+        viewModel.focusArea = "   "
+        await viewModel.complete(using: sessionViewModel)
+
+        #expect(!viewModel.state.isComplete)
+        #expect(viewModel.errorMessage == "Add an academic focus before continuing.")
+        #expect(userService.savedProfiles.isEmpty)
+        #expect(!userService.onboardingState.isComplete)
+        #expect(!analyticsService.events.contains("onboarding_completed"))
+    }
+
     @Test func onboardingCompletionTrimsProfileBeforePersisting() async throws {
         var profile = testProfile(id: uniqueUserID("onboarding-trim"))
         profile.displayName = "  Riley  "

@@ -123,7 +123,7 @@ final class OnboardingViewModel: ObservableObject {
             profile.academicFocus = trimmedFocusArea
             profile.displayName = trimmedDisplayName
 
-            guard !trimmedFocusArea.isEmpty || !trimmedDisplayName.isEmpty else {
+            guard !trimmedFocusArea.isEmpty else {
                 state.didCompleteProfile = false
                 state.completedAt = nil
                 errorMessage = "Add an academic focus before continuing."
