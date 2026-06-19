@@ -184,6 +184,7 @@ This intentionally creates AI usage records plus assistant, goal-plan, and sylla
 - Branch protection is enabled on `main`, requiring strict up-to-date backend, iOS, and CodeQL checks before merge.
 - CodeQL and backend/iOS CI workflows have passed on public PRs and merged `main`; each workflow now runs on every PR and self-skips unrelated work so required checks are not left missing on docs-only changes.
 - Backend CI runs `scripts/check_public_repo_safety.sh` on every PR and `main` push so tracked real config files, obvious secret-like values, local build output, and private workspace paths fail before merge.
+- Backend CI caches Firebase emulator downloads for rules tests to reduce required-check network flakiness.
 - Dependabot update schedules are configured for GitHub Actions, backend npm dependencies, and Swift Package Manager.
 - GitHub secret-scanning and code-scanning alert APIs currently return no open alerts; the open Dependabot dependency alerts are tracked in the verification section above.
 - Current tracked tree secret scan has no known credential matches; real local config files remain ignored and untracked.
