@@ -506,10 +506,14 @@ final class AssistantService: AssistantServicing {
         response: AIWorkflowRunResponse<AIAssistantChatResult>
     ) -> AssistantThread {
         let draftID = response.draftID
-        let drafts = response.result.draftActions.enumerated().map { index, action in
+        let drafts = response.result.draftActions.enumerated().compactMap { index, action -> AssistantDraftAction? in
+            guard let kind = draftKind(for: action.type) else {
+                return nil
+            }
+
             AssistantDraftAction(
                 id: draftID.map { "\($0)-action-\(index + 1)" } ?? UUID().uuidString,
-                kind: draftKind(for: action.type),
+                kind: kind,
                 title: action.title,
                 detail: action.dueAt.map { "\(action.reason) Suggested time: \($0)" } ?? action.reason
             )
@@ -525,22 +529,25 @@ final class AssistantService: AssistantServicing {
         )
     }
 
-    private static func draftKind(for actionType: String) -> AssistantDraftKind {
+    private static func draftKind(for actionType: String) -> AssistantDraftKind? {
         let normalized = actionType.lowercased()
 
-        if normalized.contains("goal") {
+        if normalized == "goal_plan" || normalized.contains("goal") {
             return .goalPlan
         }
 
-        if normalized.contains("session") {
-            return .sessionEvaluation
+        if normalized == "planner_adjustment" ||
+            normalized.contains("planner") ||
+            normalized.contains("schedule") ||
+            normalized.contains("calendar") ||
+            normalized.contains("block") ||
+            normalized.contains("study") ||
+            normalized.contains("assignment") ||
+            normalized.contains("task") {
+            return .plannerAdjustment
         }
 
-        if normalized.contains("check") || normalized.contains("vibe") || normalized.contains("reflection") {
-            return .checkInSummary
-        }
-
-        return .plannerAdjustment
+        return nil
     }
 }
 

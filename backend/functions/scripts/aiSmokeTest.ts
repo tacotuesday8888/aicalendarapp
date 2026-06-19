@@ -15,6 +15,7 @@ import {
   vibeFeedbackFlow
 } from "../src/ai/workflows.js";
 import { commitAssistantDraftRecord, plannerBlockWindowForDraftAction } from "../src/ai/assistant.js";
+import { assistantDraftKind } from "../src/ai/drafts.js";
 import {
   assistantChatResultSchema,
   goalPlanGenerationResultSchema,
@@ -64,6 +65,7 @@ process.env.AI_PROVIDER = "stub";
 async function runSmokeTest() {
   assertAIConfigDefaults();
   assertPromptContracts();
+  assertAssistantDraftActionContract();
   assertUsagePolicy();
   assertSubscriptionSnapshotFreshnessContract();
   await assertUsageLoggingContract();
@@ -566,6 +568,53 @@ async function assertAssistantDraftCommitContract() {
     "assistant draft commits must not mark artifacts confirmed when applying the draft fails"
   );
 
+  for (const unsupportedKind of ["sessionEvaluation", "checkInSummary"]) {
+    const unsupportedCommitCalls: string[] = [];
+    await assert.rejects(
+      () =>
+        commitAssistantDraftRecord(
+          {
+            userID: "smoke-test-user",
+            action: {
+              id: `unsupported-${unsupportedKind}`,
+              kind: unsupportedKind,
+              title: "Client supplied title",
+              detail: "Client supplied detail"
+            }
+          },
+          {
+            loadDraftArtifact: async () => {
+              unsupportedCommitCalls.push("load");
+              return {
+                exists: true,
+                status: "pending",
+                data: {
+                  kind: unsupportedKind,
+                  title: "Stored unsupported draft",
+                  detail: "This legacy draft cannot be committed."
+                }
+              };
+            },
+            applyDraftAction: async () => {
+              unsupportedCommitCalls.push("apply");
+            },
+            updateAssistantThreadAfterCommit: async () => {
+              unsupportedCommitCalls.push("thread");
+            },
+            markDraftConfirmed: async () => {
+              unsupportedCommitCalls.push("confirm");
+            }
+          }
+        ),
+      /Unsupported assistant draft action/
+    );
+    assert.deepEqual(
+      unsupportedCommitCalls,
+      ["load"],
+      "unsupported assistant draft artifacts must not apply, update the thread, or mark confirmed"
+    );
+  }
+
   const successfulCommitCalls: string[] = [];
   await commitAssistantDraftRecord(
     {
@@ -608,6 +657,52 @@ async function assertAssistantDraftCommitContract() {
     ["load", "apply:Stored draft title", "dueAt:2026-04-27T14:30:00.000Z", "thread", "confirm"],
     "assistant draft commits must apply the stored artifact before confirming it"
   );
+}
+
+function assertAssistantDraftActionContract() {
+  assistantChatResultSchema.parse({
+    message: "Review this draft before committing it.",
+    draftActions: [
+      {
+        type: "goal_plan",
+        title: "Draft a plan for chemistry",
+        dueAt: null,
+        reason: "Break the goal into reviewable steps."
+      },
+      {
+        type: "planner_adjustment",
+        title: "Protect one focused study block",
+        dueAt: "2026-04-27T14:30:00.000Z",
+        reason: "Add this to the planner if it still fits."
+      }
+    ]
+  });
+
+  for (const unsupportedType of ["session_evaluation", "check_in_summary", "reflection_summary", "unsupported"]) {
+    assert.throws(
+      () =>
+        assistantChatResultSchema.parse({
+          message: "This should stay in the assistant message.",
+          draftActions: [
+            {
+              type: unsupportedType,
+              title: "Unsupported action",
+              dueAt: null,
+              reason: "Not a committable app change."
+            }
+          ]
+        }),
+      /Invalid enum value/
+    );
+  }
+
+  assert.equal(assistantDraftKind("goal_plan"), "goalPlan");
+  assert.equal(assistantDraftKind("planner_adjustment"), "plannerAdjustment");
+  assert.equal(assistantDraftKind("schedule_block"), "plannerAdjustment");
+  assert.equal(assistantDraftKind("study_session"), "plannerAdjustment");
+  assert.equal(assistantDraftKind("session_evaluation"), null);
+  assert.equal(assistantDraftKind("reflection_summary"), null);
+  assert.equal(assistantDraftKind("unsupported"), null);
 }
 
 function assertNotificationDispatchContract() {
@@ -722,6 +817,15 @@ function assertPromptContracts() {
     assert.ok(prompt.includes("Allowed scope:"), `${featureName} prompt must define allowed scope.`);
     assert.ok(prompt.includes("Output format"), `${featureName} prompt must define output expectations.`);
   }
+
+  assert.ok(
+    ASSISTANT_CHAT_SYSTEM_PROMPT.includes("Allowed draftAction.type values are exactly goal_plan and planner_adjustment"),
+    "assistant_chat prompt must name the exact supported draft action types."
+  );
+  assert.ok(
+    ASSISTANT_CHAT_SYSTEM_PROMPT.includes("reflections, check-ins, session evaluations"),
+    "assistant_chat prompt must keep non-committable reflection/check-in/session feedback out of draftActions."
+  );
 }
 
 function restoreEnvValue(key: string, value: string | undefined) {

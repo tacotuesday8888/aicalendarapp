@@ -84,13 +84,22 @@ export async function storeAssistantChatReviewState(
   const timestamp = Date.now();
   const existingMessages = Array.isArray(threadData?.messages) ? threadData.messages : [];
   const existingPendingDrafts = Array.isArray(threadData?.pendingDrafts) ? threadData.pendingDrafts : [];
-  const newDrafts = result.draftActions.map((action, index) => ({
-    id: assistantDraftArtifactID(draftID, timestamp, index),
-    kind: assistantDraftKind(action.type),
-    title: action.title,
-    detail: action.dueAt ? `${action.reason} Suggested time: ${action.dueAt}` : action.reason,
-    dueAt: action.dueAt?.trim() || null
-  }));
+  const newDrafts = result.draftActions.flatMap((action, index) => {
+    const kind = assistantDraftKind(action.type);
+    if (!kind) {
+      return [];
+    }
+
+    return [
+      {
+        id: assistantDraftArtifactID(draftID, timestamp, index),
+        kind,
+        title: action.title,
+        detail: action.dueAt ? `${action.reason} Suggested time: ${action.dueAt}` : action.reason,
+        dueAt: action.dueAt?.trim() || null
+      }
+    ];
+  });
 
   await Promise.all([
     threadRef.set(
@@ -184,22 +193,27 @@ function assistantDraftArtifactID(draftID: string | null, timestamp: number, ind
   return `${baseID}-action-${index + 1}`;
 }
 
-function assistantDraftKind(actionType: string): AssistantDraftRecord["kind"] {
+export function assistantDraftKind(actionType: string): AssistantDraftRecord["kind"] | null {
   const normalized = actionType.toLowerCase();
 
-  if (normalized.includes("goal")) {
+  if (normalized === "goal_plan" || normalized.includes("goal")) {
     return "goalPlan";
   }
 
-  if (normalized.includes("session")) {
-    return "sessionEvaluation";
+  if (
+    normalized === "planner_adjustment" ||
+    normalized.includes("planner") ||
+    normalized.includes("schedule") ||
+    normalized.includes("calendar") ||
+    normalized.includes("block") ||
+    normalized.includes("study") ||
+    normalized.includes("assignment") ||
+    normalized.includes("task")
+  ) {
+    return "plannerAdjustment";
   }
 
-  if (normalized.includes("check") || normalized.includes("vibe") || normalized.includes("reflection")) {
-    return "checkInSummary";
-  }
-
-  return "plannerAdjustment";
+  return null;
 }
 
 function normalizedSyllabusDueDate(value: string | null, sourceText: string): string | null {

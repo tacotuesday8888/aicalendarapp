@@ -365,10 +365,10 @@ function buildAssistantStubResult(message: string, goalCount: number, plannerBlo
     };
   }
 
-  const draftActions = shouldSuggestDraftAction(message)
+  const draftActions: AssistantChatResult["draftActions"] = shouldSuggestDraftAction(message)
     ? [
         {
-          type: "planner_suggestion",
+          type: "planner_adjustment",
           title: "Review one focused study block",
           dueAt: null,
           reason: "This is a draft suggestion only. Confirm it in the app before anything is added to your planner."
