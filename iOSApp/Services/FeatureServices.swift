@@ -553,6 +553,7 @@ final class AssistantService: AssistantServicing {
 
 final class SyllabusImportService: SyllabusImportServicing {
     static let shared = SyllabusImportService()
+    private static let maxImportFileBytes = 10 * 1024 * 1024
 
     var databaseService: DatabaseServicing?
     var storageService: StorageServicing?
@@ -578,6 +579,7 @@ final class SyllabusImportService: SyllabusImportServicing {
             }
         }
 
+        try Self.validateImportFileSize(fileURL)
         let extractedText = try extractImportText(from: fileURL)
         _ = try requiredAIBackendService(aiBackendService)
         let data = try Data(contentsOf: fileURL)
@@ -612,6 +614,15 @@ final class SyllabusImportService: SyllabusImportServicing {
         try await requiredBackendFunctionService(backendFunctionService).deleteImport(
             DeleteImportPayload(userID: userID, job: job)
         )
+    }
+
+    private static func validateImportFileSize(_ fileURL: URL) throws {
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+        guard let fileSize = values.fileSize else { return }
+
+        if fileSize >= maxImportFileBytes {
+            throw AppError.network(description: "Syllabus files must be smaller than 10 MB. Choose a smaller text or searchable PDF file.")
+        }
     }
 
     private func extractImportText(from fileURL: URL) throws -> String {

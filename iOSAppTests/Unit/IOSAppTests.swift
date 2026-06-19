@@ -3021,6 +3021,19 @@ struct IOSAppTests {
         #expect(viewModel.committingJobID == nil)
     }
 
+    @Test func syllabusImportServiceRejectsFilesAtStorageSizeLimitBeforeUpload() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oversized-syllabus-\(UUID().uuidString).txt")
+        try Data(repeating: 65, count: 10 * 1024 * 1024).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let service = SyllabusImportService()
+
+        await #expect(throws: AppError.network(description: "Syllabus files must be smaller than 10 MB. Choose a smaller text or searchable PDF file.")) {
+            _ = try await service.importFile(at: fileURL, for: uniqueUserID("oversized-import"))
+        }
+    }
+
     @Test func assistantLocalFallbackDropsUnsupportedDraftActions() async throws {
         let service = AssistantService()
         let aiBackend = TestAIBackendService(
