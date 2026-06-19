@@ -75,6 +75,8 @@
 	<string>$(PRIVACY_POLICY_URL)</string>
 	<key>TermsOfServiceURL</key>
 	<string>$(TERMS_OF_SERVICE_URL)</string>
+	<key>SupportURL</key>
+	<string>$(SUPPORT_URL)</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>

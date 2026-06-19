@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         configureFirebaseIfAvailable()
         configureGoogleSignInIfAvailable()
         validateBackendEndpointsIfAvailable()
-        validateLegalURLsIfAvailable()
+        validateAppReviewURLsIfAvailable()
         configureRevenueCatIfAvailable()
         configureSuperwallIfAvailable()
         configureNotifications(for: application)
@@ -271,13 +271,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         logger.info("Validated backend endpoint configuration.")
     }
 
-    private func validateLegalURLsIfAvailable() {
-        let validation = AppConfiguration.validateLegalURLs(
+    private func validateAppReviewURLsIfAvailable() {
+        let validation = AppConfiguration.validateAppReviewURLs(
             privacyPolicyURL: configuration.privacyPolicyURL,
-            termsOfServiceURL: configuration.termsOfServiceURL
+            termsOfServiceURL: configuration.termsOfServiceURL,
+            supportURL: configuration.supportURL
         )
         guard validation == .valid else {
-            let failureReason = validation.failureReason ?? "Legal URL configuration is invalid."
+            let failureReason = validation.failureReason ?? "App review URL configuration is invalid."
             #if DEBUG
             logger.notice(failureReason)
             return
@@ -286,7 +287,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             #endif
         }
 
-        logger.info("Validated legal URL configuration.")
+        logger.info("Validated app review URL configuration.")
     }
 }
 

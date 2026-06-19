@@ -942,40 +942,53 @@ struct IOSAppTests {
         )
     }
 
-    @Test func legalURLValidationRequiresPublicHTTPSURLs() {
+    @Test func appReviewURLValidationRequiresPublicHTTPSURLs() {
         let privacyURL = URL(string: "https://aicalendar.app/privacy")!
         let termsURL = URL(string: "https://aicalendar.app/terms")!
+        let supportURL = URL(string: "https://aicalendar.app/support")!
         let placeholderURL = URL(string: "https://example.com/privacy")!
         let insecureURL = URL(string: "http://aicalendar.app/privacy")!
 
         #expect(
-            AppConfiguration.validateLegalURLs(
+            AppConfiguration.validateAppReviewURLs(
                 privacyPolicyURL: privacyURL,
-                termsOfServiceURL: termsURL
+                termsOfServiceURL: termsURL,
+                supportURL: supportURL
             ) == .valid
         )
         #expect(
-            AppConfiguration.validateLegalURLs(
+            AppConfiguration.validateAppReviewURLs(
                 privacyPolicyURL: nil,
-                termsOfServiceURL: termsURL
+                termsOfServiceURL: termsURL,
+                supportURL: supportURL
             ) == .missingRequiredURLs(["PrivacyPolicyURL"])
         )
         #expect(
-            AppConfiguration.validateLegalURLs(
+            AppConfiguration.validateAppReviewURLs(
                 privacyPolicyURL: privacyURL,
-                termsOfServiceURL: nil
+                termsOfServiceURL: nil,
+                supportURL: supportURL
             ) == .missingRequiredURLs(["TermsOfServiceURL"])
         )
         #expect(
-            AppConfiguration.validateLegalURLs(
+            AppConfiguration.validateAppReviewURLs(
+                privacyPolicyURL: privacyURL,
+                termsOfServiceURL: termsURL,
+                supportURL: nil
+            ) == .missingRequiredURLs(["SupportURL"])
+        )
+        #expect(
+            AppConfiguration.validateAppReviewURLs(
                 privacyPolicyURL: placeholderURL,
-                termsOfServiceURL: termsURL
+                termsOfServiceURL: termsURL,
+                supportURL: supportURL
             ) == .placeholderURLs(["PrivacyPolicyURL"])
         )
         #expect(
-            AppConfiguration.validateLegalURLs(
+            AppConfiguration.validateAppReviewURLs(
                 privacyPolicyURL: insecureURL,
-                termsOfServiceURL: termsURL
+                termsOfServiceURL: termsURL,
+                supportURL: supportURL
             ) == .unsupportedURLScheme(["PrivacyPolicyURL"])
         )
     }

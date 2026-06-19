@@ -406,13 +406,16 @@ struct SettingsView: View {
                 .disabled(viewModel.isExportingData || viewModel.isDeletingAccount)
             }
 
-            if configuration.privacyPolicyURL != nil || configuration.termsOfServiceURL != nil {
+            if configuration.privacyPolicyURL != nil || configuration.termsOfServiceURL != nil || configuration.supportURL != nil {
                 Section("Legal") {
                     if let privacyPolicyURL = configuration.privacyPolicyURL {
                         Link("Privacy Policy", destination: privacyPolicyURL)
                     }
                     if let termsOfServiceURL = configuration.termsOfServiceURL {
                         Link("Terms of Service", destination: termsOfServiceURL)
+                    }
+                    if let supportURL = configuration.supportURL {
+                        Link("Support", destination: supportURL)
                     }
                 }
             }
