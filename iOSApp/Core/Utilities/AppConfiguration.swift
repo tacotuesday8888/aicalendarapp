@@ -99,7 +99,7 @@ struct AppConfiguration: Sendable {
         }
     }
 
-    enum LegalURLValidation: Equatable, Sendable {
+    enum AppReviewURLValidation: Equatable, Sendable {
         case valid
         case missingRequiredURLs([String])
         case placeholderURLs([String])
@@ -110,11 +110,11 @@ struct AppConfiguration: Sendable {
             case .valid:
                 return nil
             case .missingRequiredURLs(let keys):
-                return "Legal URLs are required for non-debug builds: \(keys.joined(separator: ", "))."
+                return "App review web URLs are required for non-debug builds: \(keys.joined(separator: ", "))."
             case .placeholderURLs(let keys):
-                return "Legal URLs must be replaced with publicly accessible policy URLs: \(keys.joined(separator: ", "))."
+                return "App review web URLs must be replaced with publicly accessible URLs: \(keys.joined(separator: ", "))."
             case .unsupportedURLScheme(let keys):
-                return "Legal URLs must use HTTPS: \(keys.joined(separator: ", "))."
+                return "App review web URLs must use HTTPS: \(keys.joined(separator: ", "))."
             }
         }
     }
@@ -132,6 +132,7 @@ struct AppConfiguration: Sendable {
     let googleReversedClientID: String
     let privacyPolicyURL: URL?
     let termsOfServiceURL: URL?
+    let supportURL: URL?
 
     init(bundle: Bundle) {
         bundleID = bundle.bundleIdentifier ?? "com.langqi.aicalendarapp"
@@ -148,6 +149,7 @@ struct AppConfiguration: Sendable {
         googleReversedClientID = bundle.object(forInfoDictionaryKey: "GoogleReversedClientID") as? String ?? ""
         privacyPolicyURL = AppConfiguration.url(for: "PrivacyPolicyURL", in: bundle)
         termsOfServiceURL = AppConfiguration.url(for: "TermsOfServiceURL", in: bundle)
+        supportURL = AppConfiguration.url(for: "SupportURL", in: bundle)
 
         if
             let rawURL = bundle.object(forInfoDictionaryKey: "APIBaseURL") as? String,
@@ -289,7 +291,11 @@ struct AppConfiguration: Sendable {
         return .valid
     }
 
-    static func validateLegalURLs(privacyPolicyURL: URL?, termsOfServiceURL: URL?) -> LegalURLValidation {
+    static func validateAppReviewURLs(
+        privacyPolicyURL: URL?,
+        termsOfServiceURL: URL?,
+        supportURL: URL?
+    ) -> AppReviewURLValidation {
         var missingKeys = [String]()
         var placeholderKeys = [String]()
         var unsupportedSchemeKeys = [String]()
@@ -304,6 +310,13 @@ struct AppConfiguration: Sendable {
         validateRequiredHTTPSURL(
             termsOfServiceURL,
             key: "TermsOfServiceURL",
+            missingKeys: &missingKeys,
+            placeholderKeys: &placeholderKeys,
+            unsupportedSchemeKeys: &unsupportedSchemeKeys
+        )
+        validateRequiredHTTPSURL(
+            supportURL,
+            key: "SupportURL",
             missingKeys: &missingKeys,
             placeholderKeys: &placeholderKeys,
             unsupportedSchemeKeys: &unsupportedSchemeKeys
