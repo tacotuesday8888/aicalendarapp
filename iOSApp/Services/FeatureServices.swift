@@ -511,7 +511,7 @@ final class AssistantService: AssistantServicing {
                 return nil
             }
 
-            AssistantDraftAction(
+            return AssistantDraftAction(
                 id: draftID.map { "\($0)-action-\(index + 1)" } ?? UUID().uuidString,
                 kind: kind,
                 title: action.title,
