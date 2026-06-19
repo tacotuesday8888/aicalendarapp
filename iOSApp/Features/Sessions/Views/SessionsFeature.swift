@@ -21,6 +21,8 @@ final class SessionsViewModel: ObservableObject {
     private let storageService: StorageServicing
     private let analyticsService: AnalyticsServicing
     private var observationTask: Task<Void, Never>?
+    private static let maxAttachmentFileBytes = 10 * 1024 * 1024
+    private static let supportedAttachmentContentTypePrefixes = ["application/", "text/", "image/"]
 
     init(user: UserProfile, studySessionService: StudySessionServicing, storageService: StorageServicing, analyticsService: AnalyticsServicing) {
         self.user = user
@@ -180,9 +182,9 @@ final class SessionsViewModel: ObservableObject {
         }
 
         do {
+            try Self.validateAttachmentFileSize(fileURL)
+            let contentType = try Self.validatedAttachmentContentType(for: fileURL)
             let data = try Data(contentsOf: fileURL)
-            let inferredType = UTType(filenameExtension: fileURL.pathExtension) ?? .data
-            let contentType = inferredType.preferredMIMEType ?? "application/octet-stream"
             let remotePath = try await storageService.upload(
                 data: data,
                 path: "users/\(user.id)/study-sessions/\(UUID().uuidString)-\(fileURL.lastPathComponent)",
@@ -200,6 +202,24 @@ final class SessionsViewModel: ObservableObject {
         } catch {
             errorMessage = AppError.wrap(error, fallback: "Unable to attach that file.").errorDescription
         }
+    }
+
+    private static func validateAttachmentFileSize(_ fileURL: URL) throws {
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+        guard let fileSize = values.fileSize else { return }
+
+        if fileSize >= maxAttachmentFileBytes {
+            throw AppError.network(description: "Study session attachments must be smaller than 10 MB.")
+        }
+    }
+
+    private static func validatedAttachmentContentType(for fileURL: URL) throws -> String {
+        let inferredType = UTType(filenameExtension: fileURL.pathExtension) ?? .data
+        let contentType = inferredType.preferredMIMEType ?? "application/octet-stream"
+        guard supportedAttachmentContentTypePrefixes.contains(where: { contentType.hasPrefix($0) }) else {
+            throw AppError.network(description: "This file type is not supported for study session attachments. Use a document, text file, or image.")
+        }
+        return contentType
     }
 
     func removePendingAttachment(_ attachment: StudyAttachment) {

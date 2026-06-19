@@ -86,7 +86,7 @@ RevenueCat is the subscription source of truth. Superwall handles placements and
 
 ## Google Sign-In Setup
 
-Google Sign-In requires the iOS OAuth client ID and the matching reversed client ID URL scheme. Copy `CLIENT_ID` and `REVERSED_CLIENT_ID` from the real `GoogleService-Info.plist` into `Secrets.xcconfig` as `GOOGLE_CLIENT_ID` and `GOOGLE_REVERSED_CLIENT_ID`. Google sign-in is disabled with a setup error when either value is missing, left as a template placeholder, or the reversed client ID does not match the client ID. If Google sign-in fails in a signed build, confirm the Google provider is enabled in Firebase Auth and download a fresh `GoogleService-Info.plist`.
+Google Sign-In requires the iOS OAuth client ID and the matching reversed client ID URL scheme. Copy `CLIENT_ID` and `REVERSED_CLIENT_ID` from the real `GoogleService-Info.plist` into `Secrets.xcconfig` as `GOOGLE_CLIENT_ID` and `GOOGLE_REVERSED_CLIENT_ID`. Debug builds show a setup error when either value is missing, left as a template placeholder, or the reversed client ID does not match the client ID. Non-debug builds fail at launch with the same configuration error because the auth screen exposes Google sign-in. If Google sign-in fails in a signed build, confirm the Google provider is enabled in Firebase Auth and download a fresh `GoogleService-Info.plist`.
 
 ## Legal and Support URLs
 

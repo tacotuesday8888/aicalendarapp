@@ -242,14 +242,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         )
         guard validation == .valid else {
             let failureReason = validation.failureReason ?? "Google Sign-In configuration is invalid."
+            #if DEBUG
             logger.notice(failureReason)
             return
+            #else
+            fatalError(failureReason)
+            #endif
         }
 
         #if canImport(GoogleSignIn)
         logger.info("Validated Google Sign-In configuration.")
         #else
+        #if DEBUG
         logger.notice("Google Sign-In SDK not linked.")
+        #else
+        fatalError("Google Sign-In SDK is required for non-debug builds.")
+        #endif
         #endif
     }
 

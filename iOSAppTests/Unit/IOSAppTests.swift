@@ -186,6 +186,28 @@ private final class TestPlannerService: PlannerServicing {
     }
 }
 
+private final class TestStudySessionService: StudySessionServicing {
+    private(set) var sessions = [StudySession]()
+    private(set) var deletedSessionIDs = [String]()
+
+    func observeSessions(for userID: String) -> AsyncThrowingStream<[StudySession], Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(sessions)
+            continuation.finish()
+        }
+    }
+
+    func saveSession(_ session: StudySession, for userID: String) async throws {
+        sessions.removeAll { $0.id == session.id }
+        sessions.append(session)
+    }
+
+    func deleteSession(id: String, for userID: String) async throws {
+        deletedSessionIDs.append(id)
+        sessions.removeAll { $0.id == id }
+    }
+}
+
 private final class TestGoalService: GoalServicing {
     private(set) var goals = [Goal]()
     private(set) var deletedGoalIDs = [String]()
@@ -646,6 +668,20 @@ private final class TestSyllabusImportService: SyllabusImportServicing {
 
     func delete(_ job: ImportJob, for userID: String) async throws {
         deletedJobIDs.append(job.id)
+    }
+}
+
+private final class TestStorageService: StorageServicing {
+    private(set) var uploads = [(path: String, contentType: String, byteCount: Int)]()
+    private(set) var deletedPaths = [String]()
+
+    func upload(data: Data, path: String, contentType: String) async throws -> String {
+        uploads.append((path: path, contentType: contentType, byteCount: data.count))
+        return path
+    }
+
+    func delete(path: String) async throws {
+        deletedPaths.append(path)
     }
 }
 
@@ -1612,6 +1648,48 @@ struct IOSAppTests {
         #expect(persisted.streak == 1)
         #expect(persisted.targetCountPerWeek == 4)
         #expect(persisted.isCompletedToday)
+    }
+
+    @Test func sessionsViewModelRejectsOversizedAttachmentBeforeUpload() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oversized-session-attachment-\(UUID().uuidString).txt")
+        try Data(repeating: 0, count: 10 * 1024 * 1024).write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let storageService = TestStorageService()
+        let viewModel = SessionsViewModel(
+            user: testProfile(id: uniqueUserID("session-attachment-size")),
+            studySessionService: TestStudySessionService(),
+            storageService: storageService,
+            analyticsService: TestAnalyticsService()
+        )
+
+        await viewModel.addAttachment(from: fileURL)
+
+        #expect(storageService.uploads.isEmpty)
+        #expect(viewModel.pendingAttachments.isEmpty)
+        #expect(viewModel.errorMessage == "Study session attachments must be smaller than 10 MB.")
+    }
+
+    @Test func sessionsViewModelRejectsUnsupportedAttachmentTypeBeforeUpload() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unsupported-session-attachment-\(UUID().uuidString).mp4")
+        try Data("not a real video".utf8).write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let storageService = TestStorageService()
+        let viewModel = SessionsViewModel(
+            user: testProfile(id: uniqueUserID("session-attachment-type")),
+            studySessionService: TestStudySessionService(),
+            storageService: storageService,
+            analyticsService: TestAnalyticsService()
+        )
+
+        await viewModel.addAttachment(from: fileURL)
+
+        #expect(storageService.uploads.isEmpty)
+        #expect(viewModel.pendingAttachments.isEmpty)
+        #expect(viewModel.errorMessage == "This file type is not supported for study session attachments. Use a document, text file, or image.")
     }
 
     @Test func localSubscriptionStorePublishesRestoreAndPurchaseStateChanges() async {
