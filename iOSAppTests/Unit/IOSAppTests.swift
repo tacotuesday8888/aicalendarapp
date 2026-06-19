@@ -321,6 +321,7 @@ private final class TestUserService: UserServicing {
 
 private final class TestCalendarSyncService: CalendarSyncServicing {
     var calendars = [SyncLink]()
+    var availableCalendarsError: Error?
     var disconnectError: Error?
     var importError: Error?
     var importedBlocks = [PlannerBlock]()
@@ -332,6 +333,9 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
     }
 
     func availableCalendars() async throws -> [SyncLink] {
+        if let availableCalendarsError {
+            throw availableCalendarsError
+        }
         calendars
     }
 
@@ -2012,6 +2016,28 @@ struct IOSAppTests {
         #expect(notificationService.scheduledRules.isEmpty)
         #expect(viewModel.statusMessage == "Notifications are denied.")
         #expect(analyticsService.events.contains("notification_permission_denied"))
+    }
+
+    @Test func settingsViewModelReportsCalendarPermissionFailureDuringLoad() async {
+        let profile = testProfile(id: uniqueUserID("settings-calendar-load-denied"))
+        let calendarSyncService = TestCalendarSyncService()
+        calendarSyncService.availableCalendarsError = AppError.permissionDenied("calendar access")
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: TestUserService(profile: profile),
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
+            analyticsService: TestAnalyticsService()
+        )
+
+        await viewModel.load()
+
+        #expect(viewModel.availableCalendars.isEmpty)
+        #expect(viewModel.statusMessage == "Permission for calendar access was denied.")
     }
 
     @Test func settingsViewModelDisconnectsCalendarsAndRemovesImportedBlocks() async {
