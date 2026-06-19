@@ -224,7 +224,10 @@ final class CalendarSyncService: CalendarSyncServicing {
     }
 
     func availableCalendars() async throws -> [SyncLink] {
-        _ = try await requestAccess()
+        let granted = try await requestAccess()
+        guard granted else {
+            throw AppError.permissionDenied("calendar access")
+        }
         return eventStore.calendars(for: .event).map {
             SyncLink(provider: .appleCalendar, externalID: $0.calendarIdentifier, displayName: $0.title, direction: .importOnly, lastSyncedAt: .now)
         }
