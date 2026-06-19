@@ -97,6 +97,8 @@ PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" npm --prefix backend/functions run
 bash scripts/ci_ios.sh
 ```
 
+Local iOS CI uses the ignored `.build/ci-ios` directory for DerivedData and SwiftPM package cache reuse. If package resolution gets stuck on stale local package state, rerun with `RESET_IOS_CI_PACKAGES=true bash scripts/ci_ios.sh`. GitHub Actions uses its temporary runner directory and resets package state automatically.
+
 Also run dependency-audit triage before beta/release work:
 
 ```bash
