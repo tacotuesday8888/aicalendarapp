@@ -119,6 +119,7 @@ jobs:
         env:
           LIVE_SMOKE_DRY_RUN: "true"
           LIVE_SMOKE_INCLUDE_PREMIUM_AI: "true"
+          LIVE_SMOKE_INCLUDE_IMPORT_CLEANUP: "true"
           LIVE_SMOKE_INCLUDE_TEST_PUSH: "true"
           FUNCTIONS_BASE_URL: "https://example.invalid/functions"
 
