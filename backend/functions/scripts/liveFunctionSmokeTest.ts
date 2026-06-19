@@ -119,6 +119,20 @@ function liveSmokeRequests(userID: string): SmokeRequest[] {
     }
   ];
 
+  if (process.env.LIVE_SMOKE_INCLUDE_TEST_PUSH === "true") {
+    const requireDelivered = process.env.LIVE_SMOKE_EXPECT_TEST_PUSH_DELIVERED === "true";
+    requests.push({
+      name: "sendTestPush",
+      path: "sendTestPush",
+      body: {
+        userID,
+        title: process.env.SMOKE_TEST_PUSH_TITLE?.trim() || "AI Calendar smoke test",
+        body: process.env.SMOKE_TEST_PUSH_BODY?.trim() || "Push notifications are connected for this test account."
+      },
+      assertResponse: (responseJSON) => assertTestPushResponse(responseJSON, requireDelivered)
+    });
+  }
+
   if (state.premiumAIIncluded) {
     requests.push({
       name: "exportUserData premium AI baseline",
@@ -389,6 +403,23 @@ function assertDeleteUserAccountResponse(responseJSON: unknown, userID: string) 
   assert.equal(responseJSON.success, true, "Expected deleteUserAccount success=true.");
   assert.equal(responseJSON.userID, userID, "Expected deleteUserAccount to return the deleted userID.");
   assert.ok(isJsonObject(responseJSON.deletedCollections), "Expected deleteUserAccount deletedCollections object.");
+}
+
+function assertTestPushResponse(responseJSON: unknown, requireDelivered: boolean) {
+  assert.ok(isJsonObject(responseJSON), "Expected sendTestPush to return a JSON object.");
+  assert.equal(typeof responseJSON.delivered, "boolean", "Expected sendTestPush delivered boolean.");
+  assert.ok(
+    responseJSON.staleTokenCleared === undefined || typeof responseJSON.staleTokenCleared === "boolean",
+    "Expected sendTestPush staleTokenCleared boolean when present."
+  );
+
+  if (requireDelivered) {
+    assert.equal(
+      responseJSON.delivered,
+      true,
+      "LIVE_SMOKE_EXPECT_TEST_PUSH_DELIVERED=true requires sendTestPush delivered=true. Confirm the signed app has notification permission, APNS is configured, the FCM token was saved on the disposable user's profile, and the device is reachable."
+    );
+  }
 }
 
 function assertOperationStatusResponse(responseJSON: unknown, label: string) {
