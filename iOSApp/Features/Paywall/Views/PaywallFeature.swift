@@ -35,9 +35,15 @@ final class PaywallViewModel: ObservableObject {
             let liveOffers = try await subscriptionService.availableOffers()
             if !liveOffers.isEmpty {
                 offers = liveOffers
+                errorMessage = nil
+            } else {
+                let error = AppError.dataNotFound
+                analyticsService.record(error: error, context: "paywall_offers_empty")
+                errorMessage = "Unable to load current subscription offers. Prices will be shown at checkout."
             }
         } catch {
             analyticsService.record(error: error, context: "paywall_offers")
+            errorMessage = "Unable to load current subscription offers. Prices will be shown at checkout."
         }
     }
 

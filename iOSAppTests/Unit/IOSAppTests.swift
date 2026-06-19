@@ -425,6 +425,8 @@ private final class TestNotificationService: NotificationServicing {
 
 private final class TestSubscriptionService: SubscriptionServicing {
     var state = SubscriptionState.locked
+    var availableOffersResult = SubscriptionOffer.fallbackOffers
+    var availableOffersError: Error?
     private(set) var restoredUserIDs = [String]()
     private(set) var refreshedUserIDs = [String]()
     private(set) var linkedUserIDs = [String]()
@@ -440,7 +442,10 @@ private final class TestSubscriptionService: SubscriptionServicing {
     }
 
     func availableOffers() async throws -> [SubscriptionOffer] {
-        SubscriptionOffer.fallbackOffers
+        if let availableOffersError {
+            throw availableOffersError
+        }
+        return availableOffersResult
     }
 
     func refreshStatus(for userID: String) async throws -> SubscriptionState {
@@ -2433,6 +2438,47 @@ struct IOSAppTests {
         #expect(paywallService.registerCallCount == 1)
         #expect(paywallService.handledTriggers == [.premiumAssistant])
         #expect(paywallService.handledUserIDs.first == profile.id)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test func paywallViewModelPrepareSurfacesOfferLoadFailure() async {
+        let profile = testProfile(id: uniqueUserID("paywall-offer-error"))
+        let subscriptionService = TestSubscriptionService()
+        subscriptionService.availableOffersError = AppError.integrationUnavailable("RevenueCat")
+        let analyticsService = TestAnalyticsService()
+        let viewModel = PaywallViewModel(
+            user: profile,
+            trigger: .premiumAssistant,
+            subscriptionService: subscriptionService,
+            paywallService: TestPaywallService(),
+            analyticsService: analyticsService
+        )
+
+        await viewModel.prepare()
+
+        #expect(viewModel.offers == SubscriptionOffer.fallbackOffers)
+        #expect(viewModel.errorMessage == "Unable to load current subscription offers. Prices will be shown at checkout.")
+        #expect(analyticsService.errors == ["paywall_offers"])
+    }
+
+    @Test func paywallViewModelPrepareSurfacesEmptyLiveOffers() async {
+        let profile = testProfile(id: uniqueUserID("paywall-offer-empty"))
+        let subscriptionService = TestSubscriptionService()
+        subscriptionService.availableOffersResult = []
+        let analyticsService = TestAnalyticsService()
+        let viewModel = PaywallViewModel(
+            user: profile,
+            trigger: .premiumAssistant,
+            subscriptionService: subscriptionService,
+            paywallService: TestPaywallService(),
+            analyticsService: analyticsService
+        )
+
+        await viewModel.prepare()
+
+        #expect(viewModel.offers == SubscriptionOffer.fallbackOffers)
+        #expect(viewModel.errorMessage == "Unable to load current subscription offers. Prices will be shown at checkout.")
+        #expect(analyticsService.errors == ["paywall_offers_empty"])
     }
 
     @Test func paywallViewModelPurchaseAndRestoreUseSubscriptionService() async throws {
