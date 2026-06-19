@@ -14,6 +14,7 @@ import {
   syllabusImportFlow,
   vibeFeedbackFlow
 } from "../src/ai/workflows.js";
+import { commitAssistantDraftRecord } from "../src/ai/assistant.js";
 import {
   assistantChatResultSchema,
   goalPlanGenerationResultSchema,
@@ -60,6 +61,7 @@ async function runSmokeTest() {
   assertPromptContracts();
   assertUsagePolicy();
   await assertUsageLoggingContract();
+  await assertAssistantDraftCommitContract();
   assertSubscriptionSyncContract();
   assertNotificationDispatchContract();
 
@@ -395,6 +397,93 @@ function assertSubscriptionSyncContract() {
       lastSyncedAt: "2026-04-26T12:00:00.000Z"
     }
   });
+}
+
+async function assertAssistantDraftCommitContract() {
+  const failedCommitCalls: string[] = [];
+
+  await assert.rejects(
+    () =>
+      commitAssistantDraftRecord(
+        {
+          userID: "smoke-test-user",
+          action: {
+            id: "draft-1",
+            kind: "goalPlan",
+            title: "Client supplied title",
+            detail: "Client supplied detail"
+          }
+        },
+        {
+          loadDraftArtifact: async () => ({
+            exists: true,
+            status: "pending",
+            data: {
+              kind: "goalPlan",
+              title: "Stored draft title",
+              detail: "Stored draft detail"
+            }
+          }),
+          applyDraftAction: async () => {
+            failedCommitCalls.push("apply");
+            throw new Error("simulated apply failure");
+          },
+          updateAssistantThreadAfterCommit: async () => {
+            failedCommitCalls.push("thread");
+          },
+          markDraftConfirmed: async () => {
+            failedCommitCalls.push("confirm");
+          }
+        }
+      ),
+    /simulated apply failure/
+  );
+  assert.deepEqual(
+    failedCommitCalls,
+    ["apply"],
+    "assistant draft commits must not mark artifacts confirmed when applying the draft fails"
+  );
+
+  const successfulCommitCalls: string[] = [];
+  await commitAssistantDraftRecord(
+    {
+      userID: "smoke-test-user",
+      action: {
+        id: "draft-2",
+        kind: "plannerAdjustment",
+        title: "Client supplied title",
+        detail: "Client supplied detail"
+      }
+    },
+    {
+      loadDraftArtifact: async () => {
+        successfulCommitCalls.push("load");
+        return {
+          exists: true,
+          status: "pending",
+          data: {
+            kind: "plannerAdjustment",
+            title: "Stored draft title",
+            detail: "Stored draft detail"
+          }
+        };
+      },
+      applyDraftAction: async (action) => {
+        successfulCommitCalls.push(`apply:${action.title}`);
+      },
+      updateAssistantThreadAfterCommit: async () => {
+        successfulCommitCalls.push("thread");
+      },
+      markDraftConfirmed: async () => {
+        successfulCommitCalls.push("confirm");
+      }
+    }
+  );
+  assert.deepEqual(
+    successfulCommitCalls,
+    ["load", "apply:Stored draft title", "thread", "confirm"],
+    "assistant draft commits must apply the stored artifact before confirming it"
+  );
 }
 
 function assertNotificationDispatchContract() {
