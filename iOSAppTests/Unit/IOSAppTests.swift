@@ -819,6 +819,57 @@ struct IOSAppTests {
         #expect(AppConfiguration.validateSuperwallAPIKey("appl_revenuecat_ios_key") == .unsupportedPublicSDKKey)
     }
 
+    @Test func googleSignInConfigurationValidationAllowsMatchingOAuthValues() {
+        #expect(
+            AppConfiguration.validateGoogleSignInConfiguration(
+                clientID: "1234567890-abcdef.apps.googleusercontent.com",
+                reversedClientID: "com.googleusercontent.apps.1234567890-abcdef"
+            ) == .valid
+        )
+    }
+
+    @Test func googleSignInConfigurationValidationRejectsMissingAndPlaceholderValues() {
+        #expect(
+            AppConfiguration.validateGoogleSignInConfiguration(
+                clientID: "",
+                reversedClientID: "com.googleusercontent.apps.123"
+            ) == .missingClientID
+        )
+        #expect(
+            AppConfiguration.validateGoogleSignInConfiguration(
+                clientID: "123.apps.googleusercontent.com",
+                reversedClientID: ""
+            ) == .missingReversedClientID
+        )
+        #expect(
+            AppConfiguration.validateGoogleSignInConfiguration(
+                clientID: "your_google_client_id.apps.googleusercontent.com",
+                reversedClientID: "com.googleusercontent.apps.your_google_client_id"
+            ) == .placeholderValue
+        )
+    }
+
+    @Test func googleSignInConfigurationValidationRejectsUnsupportedOrMismatchedValues() {
+        #expect(
+            AppConfiguration.validateGoogleSignInConfiguration(
+                clientID: "1234567890-abcdef",
+                reversedClientID: "com.googleusercontent.apps.1234567890-abcdef"
+            ) == .unsupportedClientID
+        )
+        #expect(
+            AppConfiguration.validateGoogleSignInConfiguration(
+                clientID: "1234567890-abcdef.apps.googleusercontent.com",
+                reversedClientID: "aicalendarapp"
+            ) == .unsupportedReversedClientID
+        )
+        #expect(
+            AppConfiguration.validateGoogleSignInConfiguration(
+                clientID: "1234567890-abcdef.apps.googleusercontent.com",
+                reversedClientID: "com.googleusercontent.apps.other-client"
+            ) == .mismatchedReversedClientID
+        )
+    }
+
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
         let service = GoalService()
         service.backendFunctionService = BackendFunctionService()

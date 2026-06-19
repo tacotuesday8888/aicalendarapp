@@ -662,14 +662,12 @@ final class AuthService: AuthServicing {
 
         #if DEBUG
         #if canImport(GoogleSignIn)
-        guard !AppConfiguration.shared.googleClientID.isEmpty else {
-            throw AppError.missingConfiguration("GoogleClientID")
-        }
+        let clientID = try validatedGoogleClientID(AppConfiguration.shared.googleClientID)
         guard let presenter = UIApplication.topViewController() else {
             throw AppError.unknown("Unable to find a view controller for Google sign-in.")
         }
 
-        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: AppConfiguration.shared.googleClientID)
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
         let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presenter)
         let user = result.user
         let profile = UserProfile(
@@ -935,11 +933,9 @@ final class AuthService: AuthServicing {
         }
 
         let clientID = FirebaseApp.app()?.options.clientID ?? AppConfiguration.shared.googleClientID
-        guard !clientID.isEmpty else {
-            throw AppError.missingConfiguration("GoogleClientID")
-        }
+        let validatedClientID = try validatedGoogleClientID(clientID)
 
-        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: validatedClientID)
         let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presenter)
         guard let idToken = result.user.idToken?.tokenString else {
             throw AppError.unknown("Google sign-in did not return an ID token.")
@@ -962,6 +958,18 @@ final class AuthService: AuthServicing {
     #else
     private func signInWithFirebaseGoogle() async throws -> UserProfile? { nil }
     #endif
+
+    private func validatedGoogleClientID(_ rawClientID: String) throws -> String {
+        let validation = AppConfiguration.validateGoogleSignInConfiguration(
+            clientID: rawClientID,
+            reversedClientID: AppConfiguration.shared.googleReversedClientID
+        )
+        guard validation == .valid else {
+            let failureReason = validation.failureReason ?? "Google Sign-In configuration is invalid."
+            throw AppError.missingConfiguration("Google Sign-In: \(failureReason)")
+        }
+        return rawClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     private func makeProfile(
         id: String,

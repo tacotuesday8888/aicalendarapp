@@ -50,6 +50,35 @@ struct AppConfiguration: Sendable {
         }
     }
 
+    enum GoogleSignInConfigurationValidation: Equatable, Sendable {
+        case valid
+        case missingClientID
+        case missingReversedClientID
+        case placeholderValue
+        case unsupportedClientID
+        case unsupportedReversedClientID
+        case mismatchedReversedClientID
+
+        var failureReason: String? {
+            switch self {
+            case .valid:
+                return nil
+            case .missingClientID:
+                return "Google Sign-In client ID is required."
+            case .missingReversedClientID:
+                return "Google Sign-In reversed client ID URL scheme is required."
+            case .placeholderValue:
+                return "Google Sign-In configuration must be replaced with real Firebase/Google OAuth values."
+            case .unsupportedClientID:
+                return "Google Sign-In client ID must be the iOS OAuth client ending in apps.googleusercontent.com."
+            case .unsupportedReversedClientID:
+                return "Google Sign-In reversed client ID must use the com.googleusercontent.apps.* URL scheme."
+            case .mismatchedReversedClientID:
+                return "Google Sign-In reversed client ID must match the configured iOS OAuth client ID."
+            }
+        }
+    }
+
     static let shared = AppConfiguration(bundle: .main)
 
     let bundleID: String
@@ -153,10 +182,45 @@ struct AppConfiguration: Sendable {
         return apiKey.hasPrefix("pk_") ? .valid : .unsupportedPublicSDKKey
     }
 
+    static func validateGoogleSignInConfiguration(
+        clientID rawClientID: String,
+        reversedClientID rawReversedClientID: String
+    ) -> GoogleSignInConfigurationValidation {
+        let clientID = rawClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reversedClientID = rawReversedClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !clientID.isEmpty else {
+            return .missingClientID
+        }
+
+        guard !reversedClientID.isEmpty else {
+            return .missingReversedClientID
+        }
+
+        if containsPlaceholderMarker(clientID) || containsPlaceholderMarker(reversedClientID) {
+            return .placeholderValue
+        }
+
+        let clientIDSuffix = ".apps.googleusercontent.com"
+        guard clientID.hasSuffix(clientIDSuffix) else {
+            return .unsupportedClientID
+        }
+
+        let reversedClientIDPrefix = "com.googleusercontent.apps."
+        guard reversedClientID.hasPrefix(reversedClientIDPrefix) else {
+            return .unsupportedReversedClientID
+        }
+
+        let clientIDBody = String(clientID.dropLast(clientIDSuffix.count))
+        let expectedReversedClientID = "\(reversedClientIDPrefix)\(clientIDBody)"
+        return reversedClientID == expectedReversedClientID ? .valid : .mismatchedReversedClientID
+    }
+
     private static func containsPlaceholderMarker(_ value: String) -> Bool {
         let lowercaseValue = value.lowercased()
         return lowercaseValue.contains("your_")
             || lowercaseValue.contains("placeholder")
             || lowercaseValue.contains("my_api_key")
+            || lowercaseValue.contains("$(")
     }
 }

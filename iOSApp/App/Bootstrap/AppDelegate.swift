@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) -> Bool {
         configureGlobalAppearance()
         configureFirebaseIfAvailable()
+        configureGoogleSignInIfAvailable()
         configureRevenueCatIfAvailable()
         configureSuperwallIfAvailable()
         configureNotifications(for: application)
@@ -230,6 +231,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UITableView.appearance().backgroundColor = .clear
         UITableViewCell.appearance().backgroundColor = .clear
         UICollectionView.appearance().backgroundColor = .clear
+    }
+
+    private func configureGoogleSignInIfAvailable() {
+        let validation = AppConfiguration.validateGoogleSignInConfiguration(
+            clientID: configuration.googleClientID,
+            reversedClientID: configuration.googleReversedClientID
+        )
+        guard validation == .valid else {
+            let failureReason = validation.failureReason ?? "Google Sign-In configuration is invalid."
+            logger.notice(failureReason)
+            return
+        }
+
+        #if canImport(GoogleSignIn)
+        logger.info("Validated Google Sign-In configuration.")
+        #else
+        logger.notice("Google Sign-In SDK not linked.")
+        #endif
     }
 }
 
