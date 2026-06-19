@@ -6,7 +6,13 @@ SCHEME="${SCHEME:-aicalendarapp}"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 ONLY_TESTING="${ONLY_TESTING:-aicalendarappTests}"
 
-WORK_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}/aicalendarapp-ci}"
+if [[ -z "${WORK_ROOT:-}" ]]; then
+  if [[ -n "${RUNNER_TEMP:-}" ]]; then
+    WORK_ROOT="$RUNNER_TEMP"
+  else
+    WORK_ROOT="$PWD/.build/ci-ios"
+  fi
+fi
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$WORK_ROOT/DerivedData}"
 SOURCE_PACKAGES_PATH="${SOURCE_PACKAGES_PATH:-$WORK_ROOT/SourcePackages}"
 RESULT_BUNDLE_PATH="${RESULT_BUNDLE_PATH:-$WORK_ROOT/aicalendarapp.xcresult}"
@@ -26,6 +32,35 @@ if [[ -z "${RESET_IOS_CI_PACKAGES:-}" ]]; then
     RESET_IOS_CI_PACKAGES=true
   else
     RESET_IOS_CI_PACKAGES=false
+  fi
+fi
+
+if [[ -z "${DISABLE_IOS_CI_PACKAGE_REPOSITORY_CACHE:-}" ]]; then
+  if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    DISABLE_IOS_CI_PACKAGE_REPOSITORY_CACHE=true
+  else
+    DISABLE_IOS_CI_PACKAGE_REPOSITORY_CACHE=false
+  fi
+fi
+
+PACKAGE_REPOSITORY_CACHE_ARG=""
+if [[ "$DISABLE_IOS_CI_PACKAGE_REPOSITORY_CACHE" == "true" ]]; then
+  PACKAGE_REPOSITORY_CACHE_ARG="-disablePackageRepositoryCache"
+fi
+
+if [[ -z "${IOS_CI_GIT_HTTP_VERSION:-}" && "${GITHUB_ACTIONS:-false}" != "true" ]]; then
+  IOS_CI_GIT_HTTP_VERSION="HTTP/1.1"
+fi
+
+IOS_CI_GIT_HTTP_VERSION_APPLIED=false
+if [[ -n "${IOS_CI_GIT_HTTP_VERSION:-}" ]]; then
+  if [[ -z "${GIT_CONFIG_COUNT:-}" ]]; then
+    export GIT_CONFIG_COUNT=1
+    export GIT_CONFIG_KEY_0=http.version
+    export GIT_CONFIG_VALUE_0="$IOS_CI_GIT_HTTP_VERSION"
+    IOS_CI_GIT_HTTP_VERSION_APPLIED=true
+  else
+    echo "GIT_CONFIG_COUNT is already set; leaving Git HTTP version unchanged." >&2
   fi
 fi
 
@@ -50,6 +85,7 @@ run_with_timeout() {
     sleep "$timeout_seconds"
     if kill -0 "$command_pid" >/dev/null 2>&1; then
       echo "Command timed out after ${timeout_seconds} seconds: $*" >&2
+      print_package_resolution_diagnostics
       terminate_process_tree "$command_pid" TERM
       sleep 5
       terminate_process_tree "$command_pid" KILL
@@ -75,6 +111,16 @@ terminate_process_tree() {
   done < <(pgrep -P "$root_pid" 2>/dev/null || true)
 
   kill "-$signal" "$root_pid" >/dev/null 2>&1 || true
+}
+
+print_package_resolution_diagnostics() {
+  echo "Active package-resolution processes:" >&2
+  ps -axo pid=,ppid=,stat=,etime=,command= | awk -v source="$SOURCE_PACKAGES_PATH" -v cache="$PACKAGE_CACHE_PATH" '
+    index($0, source) || index($0, cache) || $0 ~ /xcodebuild -resolvePackageDependencies/ { print }
+  ' >&2 || true
+
+  echo "Package directory sizes:" >&2
+  du -sh "$SOURCE_PACKAGES_PATH" "$PACKAGE_CACHE_PATH" 2>/dev/null >&2 || true
 }
 
 terminate_package_resolution_processes() {
@@ -131,6 +177,7 @@ run_package_resolution_with_retries() {
     fi
 
     if ((attempt == attempts)); then
+      terminate_package_resolution_processes
       return 1
     fi
 
@@ -169,7 +216,10 @@ rm -rf "$RESULT_BUNDLE_PATH"
 echo "Xcode version:"
 xcodebuild -version
 echo "Package cache path: $PACKAGE_CACHE_PATH"
-echo "Package resolution timeout: ${PACKAGE_RESOLUTION_TIMEOUT_SECONDS}s; attempts: ${PACKAGE_RESOLUTION_ATTEMPTS}; reset packages: $RESET_IOS_CI_PACKAGES"
+echo "Package resolution timeout: ${PACKAGE_RESOLUTION_TIMEOUT_SECONDS}s; attempts: ${PACKAGE_RESOLUTION_ATTEMPTS}; reset packages: $RESET_IOS_CI_PACKAGES; disable repository cache: $DISABLE_IOS_CI_PACKAGE_REPOSITORY_CACHE"
+if [[ "$IOS_CI_GIT_HTTP_VERSION_APPLIED" == "true" ]]; then
+  echo "Git HTTP version override: $IOS_CI_GIT_HTTP_VERSION"
+fi
 
 if [[ "$RESET_IOS_CI_PACKAGES" == "true" ]]; then
   clear_package_resolution_state
@@ -182,7 +232,7 @@ resolve_packages() {
     -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
     -packageCachePath "$PACKAGE_CACHE_PATH" \
     -scmProvider system \
-    -disablePackageRepositoryCache \
+    ${PACKAGE_REPOSITORY_CACHE_ARG:+"$PACKAGE_REPOSITORY_CACHE_ARG"} \
     -skipPackageUpdates \
     -onlyUsePackageVersionsFromResolvedFile
 }
@@ -219,7 +269,7 @@ run_unit_tests() {
     -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
     -packageCachePath "$PACKAGE_CACHE_PATH" \
     -scmProvider system \
-    -disablePackageRepositoryCache \
+    ${PACKAGE_REPOSITORY_CACHE_ARG:+"$PACKAGE_REPOSITORY_CACHE_ARG"} \
     -resultBundlePath "$RESULT_BUNDLE_PATH" \
     -only-testing:"$ONLY_TESTING" \
     -skipPackageUpdates \
