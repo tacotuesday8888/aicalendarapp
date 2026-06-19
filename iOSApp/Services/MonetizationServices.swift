@@ -567,7 +567,7 @@ final class SubscriptionService: SubscriptionServicing {
 
     private func identifySuperwallUser(_ userID: String) {
         #if canImport(SuperwallKit)
-        guard !AppConfiguration.shared.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard AppConfiguration.validateSuperwallAPIKey(AppConfiguration.shared.superwallAPIKey) == .valid else {
             return
         }
         Superwall.shared.identify(userId: userID)
@@ -580,7 +580,7 @@ final class SubscriptionService: SubscriptionServicing {
 
     private func resetSuperwallUser() {
         #if canImport(SuperwallKit)
-        guard !AppConfiguration.shared.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard AppConfiguration.validateSuperwallAPIKey(AppConfiguration.shared.superwallAPIKey) == .valid else {
             return
         }
         Superwall.shared.subscriptionStatus = .inactive
@@ -590,7 +590,7 @@ final class SubscriptionService: SubscriptionServicing {
 
     private func syncSuperwallSubscriptionStatus(_ state: SubscriptionState) async {
         #if canImport(SuperwallKit)
-        guard !AppConfiguration.shared.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard AppConfiguration.validateSuperwallAPIKey(AppConfiguration.shared.superwallAPIKey) == .valid else {
             return
         }
 
@@ -621,7 +621,10 @@ final class PaywallService: PaywallServicing {
         analyticsService?.track(event: "paywall_requested", parameters: ["trigger": trigger.rawValue])
 
         #if canImport(SuperwallKit)
-        guard let configuration, !configuration.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard
+            let configuration,
+            AppConfiguration.validateSuperwallAPIKey(configuration.superwallAPIKey) == .valid
+        else {
             return
         }
         Superwall.shared.register(

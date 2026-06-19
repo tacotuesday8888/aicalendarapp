@@ -30,6 +30,26 @@ struct AppConfiguration: Sendable {
         }
     }
 
+    enum SuperwallAPIKeyValidation: Equatable, Sendable {
+        case valid
+        case missing
+        case placeholderKey
+        case unsupportedPublicSDKKey
+
+        var failureReason: String? {
+            switch self {
+            case .valid:
+                return nil
+            case .missing:
+                return "Superwall API key is required."
+            case .placeholderKey:
+                return "Superwall API key must be replaced with a real public API key before launch."
+            case .unsupportedPublicSDKKey:
+                return "Superwall requires the public SDK API key from Settings > Keys."
+            }
+        }
+    }
+
     static let shared = AppConfiguration(bundle: .main)
 
     let bundleID: String
@@ -113,11 +133,30 @@ struct AppConfiguration: Sendable {
             return allowsTestStoreKey ? .valid : .testStoreKeyNotAllowed
         }
 
-        let lowercaseAPIKey = apiKey.lowercased()
-        if lowercaseAPIKey.contains("your_") || lowercaseAPIKey.contains("placeholder") {
+        if containsPlaceholderMarker(apiKey) {
             return .placeholderKey
         }
 
         return apiKey.hasPrefix("appl_") ? .valid : .unsupportedPublicSDKKey
+    }
+
+    static func validateSuperwallAPIKey(_ rawAPIKey: String) -> SuperwallAPIKeyValidation {
+        let apiKey = rawAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty else {
+            return .missing
+        }
+
+        if containsPlaceholderMarker(apiKey) {
+            return .placeholderKey
+        }
+
+        return apiKey.hasPrefix("pk_") ? .valid : .unsupportedPublicSDKKey
+    }
+
+    private static func containsPlaceholderMarker(_ value: String) -> Bool {
+        let lowercaseValue = value.lowercased()
+        return lowercaseValue.contains("your_")
+            || lowercaseValue.contains("placeholder")
+            || lowercaseValue.contains("my_api_key")
     }
 }

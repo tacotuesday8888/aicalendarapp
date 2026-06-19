@@ -807,6 +807,18 @@ struct IOSAppTests {
         )
     }
 
+    @Test func superwallAPIKeyValidationAllowsPublicSDKKey() {
+        #expect(AppConfiguration.validateSuperwallAPIKey("  pk_public_superwall_key  ") == .valid)
+    }
+
+    @Test func superwallAPIKeyValidationRejectsMissingPlaceholderAndUnsupportedKeys() {
+        #expect(AppConfiguration.validateSuperwallAPIKey("") == .missing)
+        #expect(AppConfiguration.validateSuperwallAPIKey("pk_your_superwall_public_api_key") == .placeholderKey)
+        #expect(AppConfiguration.validateSuperwallAPIKey("MY_API_KEY") == .placeholderKey)
+        #expect(AppConfiguration.validateSuperwallAPIKey("sk_server_secret") == .unsupportedPublicSDKKey)
+        #expect(AppConfiguration.validateSuperwallAPIKey("appl_revenuecat_ios_key") == .unsupportedPublicSDKKey)
+    }
+
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
         let service = GoalService()
         service.backendFunctionService = BackendFunctionService()

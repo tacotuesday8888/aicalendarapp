@@ -163,9 +163,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     private func configureSuperwallIfAvailable() {
-        guard !configuration.superwallAPIKey.isEmpty else {
-            logger.notice("Superwall API key missing from configuration.")
+        let apiKey = configuration.superwallAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let validation = AppConfiguration.validateSuperwallAPIKey(apiKey)
+        guard validation == .valid else {
+            let failureReason = validation.failureReason ?? "Superwall API key is invalid."
+            #if DEBUG
+            logger.notice(failureReason)
             return
+            #else
+            fatalError(failureReason)
+            #endif
         }
 
         #if canImport(SuperwallKit)
@@ -174,14 +181,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             entitlementID: configuration.revenueCatEntitlementID
         )
         superwallPurchaseController = purchaseController
-        Superwall.configure(apiKey: configuration.superwallAPIKey, purchaseController: purchaseController)
+        Superwall.configure(apiKey: apiKey, purchaseController: purchaseController)
         purchaseController.syncSubscriptionStatus()
         #else
-        Superwall.configure(apiKey: configuration.superwallAPIKey)
+        Superwall.configure(apiKey: apiKey)
         #endif
         logger.info("Configured Superwall.")
         #else
+        #if DEBUG
         logger.notice("Superwall SDK not linked.")
+        #else
+        fatalError("Superwall SDK is required for non-debug builds.")
+        #endif
         #endif
     }
 
