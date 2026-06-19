@@ -83,6 +83,8 @@ RevenueCat is the subscription source of truth. Superwall handles placements and
 8. Add the Superwall public API key to `Secrets.xcconfig` as `SUPERWALL_API_KEY`.
 9. Verify a signed beta build identifies Superwall with the Firebase UID and that RevenueCat restore/purchase changes update Superwall subscription status.
 
+Premium AI uses the backend `subscriptions/current` snapshot and fails closed when a non-beta snapshot is stale. Keep `AI_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS=24` unless beta testing needs a shorter window. If `REVENUECAT_SECRET_API_KEY` or the webhook is missing, non-beta paid snapshots will eventually age out and premium AI calls will be denied. `BETA_PRO_USER_IDS` remains the intentional override for disposable beta/test accounts.
+
 ## Verification Commands
 
 Run these before merging release-readiness work:

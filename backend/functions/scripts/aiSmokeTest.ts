@@ -38,7 +38,12 @@ import {
   isBetaProUserID,
   nextWorkflowCountsForReservation
 } from "../src/ai/usagePolicy.js";
-import { logAIUsageBestEffort } from "../src/ai/usage.js";
+import {
+  DEFAULT_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS,
+  logAIUsageBestEffort,
+  subscriptionEntitlementFromSnapshot,
+  subscriptionSnapshotMaxAgeMs
+} from "../src/ai/usage.js";
 import { needsCrisisSafetyResponse, reviewVibeFeedbackForCrisis } from "../src/ai/safety.js";
 import {
   buildRevenueCatWebhookSnapshotPlan,
@@ -60,6 +65,7 @@ async function runSmokeTest() {
   assertAIConfigDefaults();
   assertPromptContracts();
   assertUsagePolicy();
+  assertSubscriptionSnapshotFreshnessContract();
   await assertUsageLoggingContract();
   await assertAssistantDraftCommitContract();
   assertSubscriptionSyncContract();
@@ -310,6 +316,7 @@ function assertSubscriptionSyncContract() {
     });
     assert.equal(matchingWebhookSnapshot.entitlement, "active");
     assert.deepEqual(matchingWebhookSnapshot.entitlementIDs, ["pro"]);
+    assert.equal(matchingWebhookSnapshot.expiresAtMs, Date.parse("2026-05-26T12:00:00.000Z"));
 
     const subscriberSnapshot = deriveSnapshotFromSubscriberResponse({
       subscriber: {
@@ -328,6 +335,7 @@ function assertSubscriptionSyncContract() {
     assert.equal(subscriberSnapshot.entitlement, "active");
     assert.deepEqual(subscriberSnapshot.entitlementIDs, ["pro"]);
     assert.equal(subscriberSnapshot.activePlan, "pro_annual");
+    assert.equal(subscriberSnapshot.expiresAtMs, Date.parse("2999-01-01T00:00:00.000Z"));
 
     const transferPlan = buildRevenueCatWebhookSnapshotPlan({
       type: "TRANSFER",
@@ -379,6 +387,7 @@ function assertSubscriptionSyncContract() {
   assert.equal(betaSnapshot.activePlan, "none");
   assert.deepEqual(betaSnapshot.entitlementIDs, ["beta_pro"]);
   assert.equal(betaSnapshot.source, "beta_pro_user_ids");
+  assert.equal(betaSnapshot.expiresAtMs, null);
 
   assert.equal(deriveBetaProSnapshot("free-uid", { BETA_PRO_USER_IDS: "beta-uid" }), null);
 
@@ -397,6 +406,109 @@ function assertSubscriptionSyncContract() {
       lastSyncedAt: "2026-04-26T12:00:00.000Z"
     }
   });
+}
+
+function assertSubscriptionSnapshotFreshnessContract() {
+  const now = new Date("2026-04-26T12:00:00.000Z");
+  const freshUpdatedAt = "2026-04-26T06:00:00.000Z";
+  const staleUpdatedAt = "2026-04-24T11:59:59.000Z";
+  const activeSnapshot = {
+    entitlement: "active",
+    source: "revenuecat_rest_api",
+    updatedAt: freshUpdatedAt,
+    revenueCatExpiresAt: "2026-05-26T12:00:00.000Z"
+  };
+
+  assert.equal(
+    subscriptionSnapshotMaxAgeMs({}),
+    DEFAULT_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS * 60 * 60 * 1000
+  );
+  assert.equal(
+    subscriptionSnapshotMaxAgeMs({ AI_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS: "2.5" }),
+    2.5 * 60 * 60 * 1000
+  );
+  assert.equal(
+    subscriptionSnapshotMaxAgeMs({ AI_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS: "0" }),
+    DEFAULT_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS * 60 * 60 * 1000
+  );
+
+  assert.equal(
+    subscriptionEntitlementFromSnapshot("paid-user", activeSnapshot, now, {}),
+    "active"
+  );
+  assert.equal(
+    subscriptionEntitlementFromSnapshot(
+      "paid-user",
+      { ...activeSnapshot, updatedAt: staleUpdatedAt },
+      now,
+      {}
+    ),
+    "inactive"
+  );
+  assert.equal(
+    subscriptionEntitlementFromSnapshot(
+      "paid-user",
+      { ...activeSnapshot, revenueCatExpiresAt: "2026-04-26T11:59:59.000Z" },
+      now,
+      {}
+    ),
+    "inactive"
+  );
+  assert.equal(
+    subscriptionEntitlementFromSnapshot(
+      "paid-user",
+      { ...activeSnapshot, updatedAt: undefined },
+      now,
+      {}
+    ),
+    "inactive"
+  );
+  assert.equal(
+    subscriptionEntitlementFromSnapshot(
+      "beta-user",
+      {
+        entitlement: "inactive",
+        source: "beta_pro_user_ids",
+        updatedAt: undefined,
+        revenueCatExpiresAt: undefined
+      },
+      now,
+      { BETA_PRO_USER_IDS: "beta-user" }
+    ),
+    "active"
+  );
+  assert.equal(
+    subscriptionEntitlementFromSnapshot(
+      "removed-beta-user",
+      {
+        entitlement: "active",
+        source: "beta_pro_user_ids",
+        updatedAt: freshUpdatedAt,
+        revenueCatExpiresAt: undefined
+      },
+      now,
+      { BETA_PRO_USER_IDS: "other-user" }
+    ),
+    "inactive"
+  );
+  assert.equal(
+    subscriptionEntitlementFromSnapshot(
+      "paid-user",
+      { ...activeSnapshot, updatedAt: "2026-04-26T09:30:01.000Z" },
+      now,
+      { AI_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS: "2.5" }
+    ),
+    "active"
+  );
+  assert.equal(
+    subscriptionEntitlementFromSnapshot(
+      "paid-user",
+      { ...activeSnapshot, updatedAt: "2026-04-26T09:29:59.000Z" },
+      now,
+      { AI_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS: "2.5" }
+    ),
+    "inactive"
+  );
 }
 
 async function assertAssistantDraftCommitContract() {

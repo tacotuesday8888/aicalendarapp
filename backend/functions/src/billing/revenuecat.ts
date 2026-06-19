@@ -41,6 +41,7 @@ type SubscriptionSnapshot = {
   activePlan: string;
   entitlementIDs: string[];
   source: "revenuecat_rest_api" | "revenuecat_webhook_fallback" | "revenuecat_transfer" | "beta_pro_user_ids";
+  expiresAtMs: number | null;
 };
 
 type SubscriptionSyncResponse = {
@@ -128,7 +129,8 @@ export function deriveSnapshotFromEvent(event: RevenueCatWebhookEvent): Subscrip
     entitlement: isActive ? "active" : "inactive",
     activePlan: isActive && event.product_id ? event.product_id : "none",
     entitlementIDs,
-    source: "revenuecat_webhook_fallback"
+    source: "revenuecat_webhook_fallback",
+    expiresAtMs: expirationAtMs
   };
 }
 
@@ -137,7 +139,8 @@ function deriveTransferSourceSnapshot(): SubscriptionSnapshot {
     entitlement: "inactive",
     activePlan: "none",
     entitlementIDs: [],
-    source: "revenuecat_transfer"
+    source: "revenuecat_transfer",
+    expiresAtMs: null
   };
 }
 
@@ -158,7 +161,8 @@ export function deriveBetaProSnapshot(userID: string, env: NodeJS.ProcessEnv = p
     entitlement: "active",
     activePlan: "none",
     entitlementIDs: ["beta_pro"],
-    source: "beta_pro_user_ids"
+    source: "beta_pro_user_ids",
+    expiresAtMs: null
   };
 }
 
@@ -216,7 +220,8 @@ export function deriveSnapshotFromSubscriberResponse(response: RevenueCatSubscri
       entitlement: "inactive",
       activePlan: "none",
       entitlementIDs: [],
-      source: "revenuecat_rest_api"
+      source: "revenuecat_rest_api",
+      expiresAtMs: null
     };
   }
 
@@ -227,17 +232,20 @@ export function deriveSnapshotFromSubscriberResponse(response: RevenueCatSubscri
       entitlement: "inactive",
       activePlan: "none",
       entitlementIDs: [],
-      source: "revenuecat_rest_api"
+      source: "revenuecat_rest_api",
+      expiresAtMs: null
     };
   }
 
   const [, primaryEntitlement] = primaryEntry;
+  const primaryExpirationAtMs = parseIsoTimestamp(primaryEntitlement.expires_date);
 
   return {
     entitlement: "active",
     activePlan: primaryEntitlement.product_identifier ?? "unknown",
     entitlementIDs: activeEntitlements.map(([identifier]) => identifier),
-    source: "revenuecat_rest_api"
+    source: "revenuecat_rest_api",
+    expiresAtMs: primaryExpirationAtMs
   };
 }
 
@@ -280,6 +288,7 @@ function subscriptionSnapshotWriteData(
     lastEventType: event.type ?? "unknown",
     revenueCatEnvironment: event.environment ?? null,
     revenueCatProductID: snapshot.activePlan !== "none" ? snapshot.activePlan : event.product_id ?? null,
+    revenueCatExpiresAt: snapshot.expiresAtMs === null ? null : new Date(snapshot.expiresAtMs).toISOString(),
     revenueCatStore: event.store ?? null,
     updatedAt: serverTimestamp()
   };
