@@ -146,6 +146,20 @@ LIVE_SMOKE_INCLUDE_PREMIUM_AI=true \
 npm --prefix backend/functions run functions:live-smoke
 ```
 
+After APNS/FCM is configured and a signed build has requested notification permission for the disposable user, run the optional push matrix:
+
+```bash
+FUNCTIONS_BASE_URL=https://<region>-<project-id>.cloudfunctions.net \
+FIREBASE_ID_TOKEN=<disposable-test-id-token> \
+FIREBASE_APP_CHECK_TOKEN=<debug-or-app-attest-token-if-enforced> \
+SMOKE_USER_ID=<disposable-test-user-uid> \
+LIVE_SMOKE_INCLUDE_TEST_PUSH=true \
+LIVE_SMOKE_EXPECT_TEST_PUSH_DELIVERED=true \
+npm --prefix backend/functions run functions:live-smoke
+```
+
+If this fails because `delivered=false`, open the app on the device, allow notifications, confirm the user profile has a saved `pushToken`, confirm the Firebase iOS app has APNS credentials configured, then rerun. If intentionally testing a missing or stale token path, omit `LIVE_SMOKE_EXPECT_TEST_PUSH_DELIVERED=true`; the script will still validate the backend response shape and stale-token cleanup result.
+
 Before running the premium matrix against the deployed backend, confirm the deployed Functions environment has live AI enabled:
 
 ```text
