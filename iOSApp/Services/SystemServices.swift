@@ -166,12 +166,11 @@ final class NotificationService: NotificationServicing {
         guard let token = await currentRemoteTokenIfAvailable() else { return false }
 
         do {
-            var profile = try await userService.fetchProfile(for: userID)
-            guard profile.pushToken == token else { return false }
-            profile.pushToken = nil
-            try await userService.saveProfile(profile)
-            logger.info("Cleared remote push token for \(userID).")
-            return true
+            let cleared = try await userService.clearPushToken(token, for: userID)
+            if cleared {
+                logger.info("Cleared remote push token for \(userID).")
+            }
+            return cleared
         } catch {
             logger.error("Failed to clear remote push token: \(error.localizedDescription)")
             return false
@@ -212,10 +211,7 @@ final class NotificationService: NotificationServicing {
 
         Task {
             do {
-                var profile = try await userService.fetchProfile(for: userID)
-                guard profile.pushToken != token else { return }
-                profile.pushToken = token
-                try await userService.saveProfile(profile)
+                try await userService.updatePushToken(token, for: userID)
                 logger.info("Persisted remote push token for \(userID).")
             } catch {
                 logger.error("Failed to persist remote push token: \(error.localizedDescription)")
