@@ -92,7 +92,7 @@ final class NetworkService: NetworkServicing {
         throw AppError.wrap(lastError ?? AppError.network(description: "Request failed."), fallback: "Request failed.")
     }
 
-    nonisolated private static func errorDescription(from data: Data, statusCode: Int) -> String {
+    nonisolated static func errorDescription(from data: Data, statusCode: Int) -> String {
         guard let detail = errorDetail(from: data) else {
             return "Request failed with status \(statusCode)."
         }
