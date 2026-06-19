@@ -171,7 +171,7 @@ This intentionally creates AI usage records plus assistant, goal-plan, and sylla
 ## Completed Repository Readiness Items
 
 - Repository visibility is public and GitHub Actions are enabled.
-- Branch protection is enabled on `main`, with backend, iOS, and CodeQL checks intended as required merge gates.
+- Branch protection is enabled on `main`, requiring strict up-to-date backend, iOS, and CodeQL checks before merge.
 - CodeQL and backend/iOS CI workflows have passed on public PRs and merged `main`; each workflow now runs on every PR and self-skips unrelated work so required checks are not left missing on docs-only changes.
 - Dependabot update schedules are configured for GitHub Actions, backend npm dependencies, and Swift Package Manager.
 - Current tracked tree secret scan has no known credential matches; real local config files remain ignored and untracked.
