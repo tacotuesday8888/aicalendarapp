@@ -36,9 +36,20 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     func load() async {
+        analyticsService.trackScreen("onboarding")
+    }
+
+    func loadCalendars() async {
         guard availableCalendars.isEmpty else { return }
+        guard !isLoading else { return }
+
+        errorMessage = nil
+        isLoading = true
+        defer { isLoading = false }
+
         do {
             availableCalendars = try await calendarSyncService.availableCalendars()
+            analyticsService.track(event: "onboarding_calendar_access_requested")
         } catch {
             errorMessage = AppError.wrap(error, fallback: "Unable to load calendars.").errorDescription
         }
@@ -50,7 +61,7 @@ final class OnboardingViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let selected = Array(selectedCalendarIDs)
+            let selected = Array(selectedCalendarIDs).sorted()
             _ = try await calendarSyncService.importSelectedCalendars(selected, for: profile.id)
             profile.selectedCalendarIDs = selected
             state.didImportCalendar = !selected.isEmpty
@@ -163,6 +174,16 @@ struct OnboardingView: View {
                     if viewModel.availableCalendars.isEmpty {
                         Text("Connect Apple Calendar to pull in classes and other time anchors.")
                             .foregroundStyle(.secondary)
+                        Button {
+                            Task { await viewModel.loadCalendars() }
+                        } label: {
+                            if viewModel.isLoading {
+                                ProgressView()
+                            } else {
+                                Text("Connect Apple Calendar")
+                            }
+                        }
+                        .disabled(viewModel.isLoading)
                     } else {
                         ForEach(viewModel.availableCalendars) { link in
                             Toggle(isOn: Binding(
@@ -184,6 +205,7 @@ struct OnboardingView: View {
                     Button("Import selected calendars") {
                         Task { await viewModel.importCalendars() }
                     }
+                    .disabled(viewModel.availableCalendars.isEmpty || viewModel.selectedCalendarIDs.isEmpty || viewModel.isLoading)
                 }
 
                 Section("Syllabus Import") {

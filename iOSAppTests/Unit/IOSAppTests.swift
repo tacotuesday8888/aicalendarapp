@@ -349,6 +349,7 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
     var disconnectError: Error?
     var importError: Error?
     var importedBlocks = [PlannerBlock]()
+    private(set) var availableCalendarRequestCount = 0
     private(set) var importedCalendarIDs = [[String]]()
     private(set) var disconnectedUserIDs = [String]()
 
@@ -357,6 +358,7 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
     }
 
     func availableCalendars() async throws -> [SyncLink] {
+        availableCalendarRequestCount += 1
         if let availableCalendarsError {
             throw availableCalendarsError
         }
@@ -2797,6 +2799,73 @@ struct IOSAppTests {
         state.didCompleteProfile = true
         state.completedAt = .now
         #expect(state.isComplete)
+    }
+
+    @Test func onboardingLoadDoesNotRequestCalendarAccessAutomatically() async {
+        let profile = testProfile(id: uniqueUserID("onboarding-calendar-no-auto-prompt"))
+        let calendarSyncService = TestCalendarSyncService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: calendarSyncService,
+            syllabusImportService: TestSyllabusImportService(),
+            analyticsService: analyticsService,
+            notificationService: TestNotificationService()
+        )
+
+        await viewModel.load()
+
+        #expect(calendarSyncService.availableCalendarRequestCount == 0)
+        #expect(viewModel.availableCalendars.isEmpty)
+        #expect(analyticsService.screens == ["onboarding"])
+    }
+
+    @Test func onboardingCalendarAccessRequiresExplicitRequest() async {
+        let profile = testProfile(id: uniqueUserID("onboarding-calendar-explicit"))
+        let calendarSyncService = TestCalendarSyncService()
+        calendarSyncService.calendars = [
+            SyncLink(
+                provider: .appleCalendar,
+                externalID: "school",
+                displayName: "School",
+                direction: .importOnly,
+                lastSyncedAt: .now
+            )
+        ]
+        let analyticsService = TestAnalyticsService()
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: calendarSyncService,
+            syllabusImportService: TestSyllabusImportService(),
+            analyticsService: analyticsService,
+            notificationService: TestNotificationService()
+        )
+
+        await viewModel.loadCalendars()
+
+        #expect(calendarSyncService.availableCalendarRequestCount == 1)
+        #expect(viewModel.availableCalendars.map(\.externalID) == ["school"])
+        #expect(analyticsService.events.contains("onboarding_calendar_access_requested"))
+        #expect(!viewModel.isLoading)
+    }
+
+    @Test func onboardingCalendarImportStoresSelectedIDsDeterministically() async {
+        let profile = testProfile(id: uniqueUserID("onboarding-calendar-sorted"))
+        let calendarSyncService = TestCalendarSyncService()
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: calendarSyncService,
+            syllabusImportService: TestSyllabusImportService(),
+            analyticsService: TestAnalyticsService(),
+            notificationService: TestNotificationService()
+        )
+        viewModel.selectedCalendarIDs = ["school", "personal"]
+
+        await viewModel.importCalendars()
+
+        #expect(calendarSyncService.importedCalendarIDs == [["personal", "school"]])
+        #expect(viewModel.profile.selectedCalendarIDs == ["personal", "school"])
+        #expect(viewModel.state.didImportCalendar)
     }
 
     @Test func onboardingCompletionRejectsWhitespaceOnlyProfile() async {
