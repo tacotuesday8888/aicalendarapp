@@ -88,6 +88,10 @@ RevenueCat is the subscription source of truth. Superwall handles placements and
 
 Google Sign-In requires the iOS OAuth client ID and the matching reversed client ID URL scheme. Copy `CLIENT_ID` and `REVERSED_CLIENT_ID` from the real `GoogleService-Info.plist` into `Secrets.xcconfig` as `GOOGLE_CLIENT_ID` and `GOOGLE_REVERSED_CLIENT_ID`. Google sign-in is disabled with a setup error when either value is missing, left as a template placeholder, or the reversed client ID does not match the client ID. If Google sign-in fails in a signed build, confirm the Google provider is enabled in Firebase Auth and download a fresh `GoogleService-Info.plist`.
 
+## Legal URLs
+
+Host the public privacy policy and terms pages before creating a non-debug beta build. Add their real HTTPS URLs to `Secrets.xcconfig` as `PRIVACY_POLICY_URL` and `TERMS_OF_SERVICE_URL`. Non-debug iOS builds fail at launch if either legal URL is missing, still points at an `example.*` placeholder, or is not HTTPS. Settings exposes these links when configured.
+
 Premium AI uses the backend `subscriptions/current` snapshot and fails closed when a non-beta snapshot is stale. Keep `AI_SUBSCRIPTION_SNAPSHOT_MAX_AGE_HOURS=24` unless beta testing needs a shorter window. If `REVENUECAT_SECRET_API_KEY` or the webhook is missing, non-beta paid snapshots will eventually age out and premium AI calls will be denied. `BETA_PRO_USER_IDS` remains the intentional override for disposable beta/test accounts.
 
 ## Verification Commands
