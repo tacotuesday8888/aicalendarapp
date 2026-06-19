@@ -210,7 +210,6 @@ final class SettingsViewModel: ObservableObject {
         do {
             try await backendFunctionService.deleteUserAccount(UserJobRequestPayload(userID: profile.id))
             await databaseService.deleteLocalData(for: profile.id)
-            try await authService.signOut()
             let cancelledCount = await notificationService.cancelLocalAccountNotifications()
             if cancelledCount > 0 {
                 analyticsService.track(
@@ -218,6 +217,7 @@ final class SettingsViewModel: ObservableObject {
                     parameters: ["count": cancelledCount]
                 )
             }
+            try await authService.signOut()
         } catch {
             statusMessage = AppError.wrap(error, fallback: "Unable to delete the account.").errorDescription ?? ""
         }
