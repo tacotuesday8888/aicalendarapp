@@ -13,6 +13,8 @@ protocol AuthServicing: AnyObject {
 protocol UserServicing: AnyObject {
     func fetchProfile(for userID: String) async throws -> UserProfile
     func saveProfile(_ profile: UserProfile) async throws
+    func updatePushToken(_ token: String, for userID: String) async throws
+    func clearPushToken(_ token: String, for userID: String) async throws -> Bool
     func fetchOnboardingState(for userID: String) async throws -> OnboardingState
     func saveOnboardingState(_ state: OnboardingState, for userID: String) async throws
 }

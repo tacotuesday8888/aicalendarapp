@@ -1004,6 +1004,29 @@ final class UserService: UserServicing {
         try await databaseService.save(profile, in: .users, id: profile.id, userID: nil)
     }
 
+    func updatePushToken(_ token: String, for userID: String) async throws {
+        if try await updatePushTokenInFirebase(token, for: userID) {
+            return
+        }
+
+        var profile = try await fetchProfile(for: userID)
+        guard profile.pushToken != token else { return }
+        profile.pushToken = token
+        try await saveProfile(profile)
+    }
+
+    func clearPushToken(_ token: String, for userID: String) async throws -> Bool {
+        if let firebaseResult = try await clearPushTokenInFirebase(token, for: userID) {
+            return firebaseResult
+        }
+
+        var profile = try await fetchProfile(for: userID)
+        guard profile.pushToken == token else { return false }
+        profile.pushToken = nil
+        try await saveProfile(profile)
+        return true
+    }
+
     func fetchOnboardingState(for userID: String) async throws -> OnboardingState {
         guard let databaseService else {
             throw AppError.unknown("Database dependency is unavailable.")
@@ -1025,6 +1048,67 @@ final class UserService: UserServicing {
 
         try await databaseService.save(state, in: .onboarding, id: "state", userID: userID)
     }
+
+    #if canImport(FirebaseCore) && canImport(FirebaseFirestore)
+    private var userProfilesCollection: CollectionReference? {
+        guard FirebaseApp.app() != nil else { return nil }
+        return Firestore.firestore().collection(AppCollection.users.rawValue)
+    }
+
+    private func userProfileDocument(for userID: String) -> DocumentReference? {
+        userProfilesCollection?.document(userID)
+    }
+
+    private func updatePushTokenInFirebase(_ token: String, for userID: String) async throws -> Bool {
+        guard let document = userProfileDocument(for: userID) else { return false }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            document.updateData([
+                "pushToken": token,
+                "pushTokenUpdatedAt": FieldValue.serverTimestamp()
+            ]) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+        return true
+    }
+
+    private func clearPushTokenInFirebase(_ token: String, for userID: String) async throws -> Bool? {
+        guard let document = userProfileDocument(for: userID) else { return nil }
+        let snapshot = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<DocumentSnapshot, Error>) in
+            document.getDocument { snapshot, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let snapshot {
+                    continuation.resume(returning: snapshot)
+                } else {
+                    continuation.resume(throwing: AppError.dataNotFound)
+                }
+            }
+        }
+
+        guard snapshot.get("pushToken") as? String == token else { return false }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            document.updateData([
+                "pushToken": FieldValue.delete(),
+                "pushTokenClearedAt": FieldValue.serverTimestamp()
+            ]) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+        return true
+    }
+    #else
+    private func updatePushTokenInFirebase(_ token: String, for userID: String) async throws -> Bool { false }
+    private func clearPushTokenInFirebase(_ token: String, for userID: String) async throws -> Bool? { nil }
+    #endif
 }
 
 private final class AppleSignInCoordinator: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
