@@ -171,7 +171,9 @@ This intentionally creates AI usage records plus assistant, goal-plan, and sylla
 ## Completed Repository Readiness Items
 
 - Repository visibility is public and GitHub Actions are enabled.
+- GitHub Dependabot alerts, Dependabot security updates, secret scanning, secret scanning push protection, and private vulnerability reporting are enabled for the repository.
 - Branch protection is enabled on `main`, requiring strict up-to-date backend, iOS, and CodeQL checks before merge.
 - CodeQL and backend/iOS CI workflows have passed on public PRs and merged `main`; each workflow now runs on every PR and self-skips unrelated work so required checks are not left missing on docs-only changes.
 - Dependabot update schedules are configured for GitHub Actions, backend npm dependencies, and Swift Package Manager.
+- GitHub secret-scanning and code-scanning alert APIs currently return no open alerts; the open Dependabot dependency alerts are tracked in the verification section above.
 - Current tracked tree secret scan has no known credential matches; real local config files remain ignored and untracked.
