@@ -59,11 +59,13 @@ import {
   firebaseMessagingErrorCode,
   isInvalidPushTokenError
 } from "../src/notifications/dispatch.js";
+import { resolveAppCheckMode } from "../src/shared/appCheck.js";
 
 process.env.AI_PROVIDER = "stub";
 
 async function runSmokeTest() {
   assertAIConfigDefaults();
+  assertAppCheckModeContract();
   assertPromptContracts();
   assertAssistantDraftActionContract();
   assertUsagePolicy();
@@ -202,6 +204,31 @@ async function runSmokeTest() {
   assert.equal(syllabusResult.courses[0]?.assignments[0]?.dueDate, null);
 
   console.log("AI smoke test passed.");
+}
+
+function assertAppCheckModeContract() {
+  assert.equal(resolveAppCheckMode({}), "monitor");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "off" }), "off");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "disabled" }), "off");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "false" }), "off");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "monitor" }), "monitor");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "warn" }), "monitor");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "enforce" }), "enforce");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "required" }), "enforce");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_MODE: "true" }), "enforce");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_ENFORCEMENT: "true" }), "enforce");
+  assert.equal(resolveAppCheckMode({ APP_CHECK_ENFORCEMENT: "false" }), "off");
+  assert.equal(
+    resolveAppCheckMode({
+      APP_CHECK_MODE: "monitor",
+      APP_CHECK_ENFORCEMENT: "true"
+    }),
+    "monitor"
+  );
+  assert.throws(
+    () => resolveAppCheckMode({ APP_CHECK_MODE: "enforced" }),
+    /Unsupported APP_CHECK_MODE/
+  );
 }
 
 function assertAIConfigDefaults() {
