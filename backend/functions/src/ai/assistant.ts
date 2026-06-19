@@ -197,6 +197,10 @@ export async function commitAssistantDraftRecord(
 
   const storedAction = assistantDraftRecordFromData(request.action.id, snapshot.data);
 
+  if (!isCommittableAssistantDraftKind(storedAction.kind)) {
+    throw new HttpsError("invalid-argument", "Unsupported assistant draft action.");
+  }
+
   await dependencies.applyDraftAction(storedAction);
   await dependencies.updateAssistantThreadAfterCommit(storedAction);
   await dependencies.markDraftConfirmed(request.action.id);
@@ -248,6 +252,10 @@ function assistantDraftKindFromValue(value: unknown): AssistantDraftRecord["kind
   }
 }
 
+function isCommittableAssistantDraftKind(kind: AssistantDraftRecord["kind"]): boolean {
+  return kind === "goalPlan" || kind === "plannerAdjustment";
+}
+
 async function applyDraftAction(userID: string, action: AssistantDraftRecord) {
   switch (action.kind) {
     case "goalPlan": {
@@ -294,7 +302,7 @@ async function applyDraftAction(userID: string, action: AssistantDraftRecord) {
     }
     case "sessionEvaluation":
     case "checkInSummary":
-      break;
+      throw new HttpsError("invalid-argument", "Unsupported assistant draft action.");
     default:
       throw new HttpsError("invalid-argument", "Unsupported assistant draft action.");
   }

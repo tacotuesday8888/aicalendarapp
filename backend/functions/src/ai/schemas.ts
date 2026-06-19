@@ -18,7 +18,7 @@ export const assistantChatPayloadSchema = z.object({
 });
 
 export const assistantDraftActionSchema = z.object({
-  type: z.string().trim().min(1),
+  type: z.enum(["goal_plan", "planner_adjustment"]),
   title: z.string().trim().min(1),
   dueAt: z.string().trim().nullable(),
   reason: z.string().trim().min(1)

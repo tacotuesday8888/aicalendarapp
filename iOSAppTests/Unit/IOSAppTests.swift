@@ -547,6 +547,29 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
     }
 }
 
+private final class TestAIBackendService: AIBackendServicing {
+    var isConfigured = true
+    var assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>
+    private(set) var workflows = [AIWorkflow]()
+
+    init(assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>) {
+        self.assistantResponse = assistantResponse
+    }
+
+    func run<Payload, Result>(
+        workflow: AIWorkflow,
+        payload: Payload,
+        decode: Result.Type
+    ) async throws -> AIWorkflowRunResponse<Result> where Payload: Encodable, Result: Decodable {
+        workflows.append(workflow)
+        guard workflow == .assistantChat,
+              let response = assistantResponse as? AIWorkflowRunResponse<Result> else {
+            throw AppError.network(description: "Unsupported test AI workflow.")
+        }
+        return response
+    }
+}
+
 private final class TestSyllabusImportService: SyllabusImportServicing {
     var observedJobs = [ImportJob]()
     var importTextResult: ImportJob?
@@ -2596,6 +2619,84 @@ struct IOSAppTests {
         #expect(viewModel.errorMessage == nil)
         #expect(analyticsService.events.contains("import_commit_confirmed"))
         #expect(viewModel.committingJobID == nil)
+    }
+
+    @Test func assistantLocalFallbackDropsUnsupportedDraftActions() async throws {
+        let service = AssistantService()
+        let aiBackend = TestAIBackendService(
+            assistantResponse: AIWorkflowRunResponse(
+                workflow: .assistantChat,
+                result: AIAssistantChatResult(
+                    message: "This belongs in the assistant reply, not a committable draft.",
+                    draftActions: [
+                        AIAssistantDraftAction(
+                            type: "no_op",
+                            title: "Suggestion only",
+                            dueAt: nil,
+                            reason: "There is nothing the app can safely commit."
+                        ),
+                        AIAssistantDraftAction(
+                            type: "session_evaluation",
+                            title: "Review the session",
+                            dueAt: nil,
+                            reason: "This should not create a commit button."
+                        )
+                    ]
+                ),
+                draftID: "draft-unsupported",
+                degraded: nil
+            )
+        )
+        service.aiBackendService = aiBackend
+
+        let thread = try await service.sendMessage(
+            "How did that study session go?",
+            for: uniqueUserID("assistant-fallback-unsupported"),
+            snapshot: .empty,
+            goals: []
+        )
+
+        #expect(aiBackend.workflows == [.assistantChat])
+        #expect(thread.messages.count == 2)
+        #expect(thread.messages[0].content == "How did that study session go?")
+        #expect(thread.messages[1].content == "This belongs in the assistant reply, not a committable draft.")
+        #expect(thread.pendingDrafts.isEmpty)
+    }
+
+    @Test func assistantLocalFallbackKeepsSupportedPlannerDraftActions() async throws {
+        let service = AssistantService()
+        let aiBackend = TestAIBackendService(
+            assistantResponse: AIWorkflowRunResponse(
+                workflow: .assistantChat,
+                result: AIAssistantChatResult(
+                    message: "I drafted one planner adjustment.",
+                    draftActions: [
+                        AIAssistantDraftAction(
+                            type: "planner_adjustment",
+                            title: "Protect chemistry review",
+                            dueAt: "2026-04-27T14:30:00.000Z",
+                            reason: "Add this if it still fits your day."
+                        )
+                    ]
+                ),
+                draftID: "draft-1",
+                degraded: nil
+            )
+        )
+        service.aiBackendService = aiBackend
+
+        let thread = try await service.sendMessage(
+            "Add a study block.",
+            for: uniqueUserID("assistant-fallback-planner"),
+            snapshot: .empty,
+            goals: []
+        )
+
+        #expect(thread.pendingDrafts.count == 1)
+        #expect(thread.pendingDrafts[0].id == "draft-1-action-1")
+        #expect(thread.pendingDrafts[0].kind == .plannerAdjustment)
+        #expect(thread.pendingDrafts[0].title == "Protect chemistry review")
+        #expect(thread.pendingDrafts[0].detail == "Add this if it still fits your day. Suggested time: 2026-04-27T14:30:00.000Z")
     }
 
     @Test func assistantDraftCommitRequiresLiveBackend() async throws {
