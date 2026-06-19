@@ -82,6 +82,8 @@ struct AppConfiguration: Sendable {
     enum BackendEndpointValidation: Equatable, Sendable {
         case valid
         case missingRequiredURLs([String])
+        case placeholderURLs([String])
+        case unsupportedURLScheme([String])
 
         var failureReason: String? {
             switch self {
@@ -89,6 +91,10 @@ struct AppConfiguration: Sendable {
                 return nil
             case .missingRequiredURLs(let keys):
                 return "Backend endpoint URLs are required for non-debug builds: \(keys.joined(separator: ", "))."
+            case .placeholderURLs(let keys):
+                return "Backend endpoint URLs must be replaced with deployed Firebase Functions URLs: \(keys.joined(separator: ", "))."
+            case .unsupportedURLScheme(let keys):
+                return "Backend endpoint URLs must use HTTPS: \(keys.joined(separator: ", "))."
             }
         }
     }
@@ -232,13 +238,35 @@ struct AppConfiguration: Sendable {
 
     static func validateBackendEndpoints(apiBaseURL: URL?, aiAPIBaseURL: URL?) -> BackendEndpointValidation {
         var missingKeys = [String]()
+        var placeholderKeys = [String]()
+        var unsupportedSchemeKeys = [String]()
+
         if apiBaseURL == nil {
             missingKeys.append("APIBaseURL")
+        } else if isPlaceholderBackendEndpoint(apiBaseURL) {
+            placeholderKeys.append("APIBaseURL")
+        } else if apiBaseURL?.scheme?.lowercased() != "https" {
+            unsupportedSchemeKeys.append("APIBaseURL")
         }
+
         if aiAPIBaseURL == nil {
             missingKeys.append("AIAPIBaseURL")
+        } else if isPlaceholderBackendEndpoint(aiAPIBaseURL) {
+            placeholderKeys.append("AIAPIBaseURL")
+        } else if aiAPIBaseURL?.scheme?.lowercased() != "https" {
+            unsupportedSchemeKeys.append("AIAPIBaseURL")
         }
-        return missingKeys.isEmpty ? .valid : .missingRequiredURLs(missingKeys)
+
+        if !missingKeys.isEmpty {
+            return .missingRequiredURLs(missingKeys)
+        }
+        if !placeholderKeys.isEmpty {
+            return .placeholderURLs(placeholderKeys)
+        }
+        if !unsupportedSchemeKeys.isEmpty {
+            return .unsupportedURLScheme(unsupportedSchemeKeys)
+        }
+        return .valid
     }
 
     private static func containsPlaceholderMarker(_ value: String) -> Bool {
@@ -247,5 +275,14 @@ struct AppConfiguration: Sendable {
             || lowercaseValue.contains("placeholder")
             || lowercaseValue.contains("my_api_key")
             || lowercaseValue.contains("$(")
+    }
+
+    private static func isPlaceholderBackendEndpoint(_ url: URL?) -> Bool {
+        guard let url else { return false }
+        let value = url.absoluteString.lowercased()
+        return containsPlaceholderMarker(value)
+            || value.contains("your-project")
+            || value.contains("your_project")
+            || value.contains("example.")
     }
 }
