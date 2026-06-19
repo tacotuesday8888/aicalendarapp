@@ -762,6 +762,14 @@ struct IOSAppTests {
         #expect(response.success)
     }
 
+    @Test func networkServiceBuildsBackendErrorMessage() {
+        let responseData = #"{"success":false,"error":"App Check is misconfigured."}"#.data(using: .utf8)!
+        let description = NetworkService.errorDescription(from: responseData, statusCode: 412)
+
+        #expect(description.contains("412"))
+        #expect(description.contains("App Check is misconfigured."))
+    }
+
     #if canImport(RevenueCat) && canImport(SuperwallKit)
     @Test func revenueCatSuperwallPurchaseMapperTreatsCancellationAsCancelled() {
         #expect(RevenueCatSuperwallPurchaseResultMapper.outcome(userCancelled: true) == .cancelled)
