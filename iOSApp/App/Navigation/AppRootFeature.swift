@@ -205,9 +205,12 @@ final class AppSessionViewModel: ObservableObject {
             }
         }
 
-        let cancelledCount = await container.notificationService.cancelReminderNotifications()
+        let cancelledCount = await container.notificationService.cancelLocalAccountNotifications()
         if cancelledCount > 0 {
-            container.analyticsService.track(event: "notification_reminders_cancelled", parameters: ["count": cancelledCount])
+            container.analyticsService.track(
+                event: "notification_local_account_notifications_cancelled",
+                parameters: ["count": cancelledCount]
+            )
         }
     }
 }

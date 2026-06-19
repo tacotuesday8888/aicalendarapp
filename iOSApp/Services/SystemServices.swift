@@ -53,6 +53,7 @@ final class NotificationService: NotificationServicing {
     private static let reminderRuleIDUserInfoKey = "aicalendar_reminder_rule_id"
     private static let checkInReminderType = "check_in_reminder"
     private static let checkInReminderBody = "Take a minute to keep your plan aligned."
+    private static let sessionTimerNotificationPrefix = "session_timer_"
 
     func requestAuthorization() async throws -> NotificationPermissionState {
         let granted = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
@@ -161,6 +162,24 @@ final class NotificationService: NotificationServicing {
         return reminderIDs.count
     }
 
+    func cancelLocalAccountNotifications() async -> Int {
+        let pendingRequests = await pendingNotificationRequests()
+        let notificationIDs = pendingRequests.compactMap { request -> String? in
+            Self.shouldRemovePendingAccountNotification(
+                identifier: request.identifier,
+                userInfo: request.content.userInfo,
+                body: request.content.body,
+                currentRuleIDs: []
+            ) ? request.identifier : nil
+        }
+
+        if !notificationIDs.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: notificationIDs)
+        }
+
+        return notificationIDs.count
+    }
+
     func clearRemoteToken(for userID: String) async -> Bool {
         guard let userService else { return false }
         guard let token = await currentRemoteTokenIfAvailable() else { return false }
@@ -187,6 +206,20 @@ final class NotificationService: NotificationServicing {
         let isCurrentRule = currentRuleIDs.contains(identifier)
         let isLegacyCheckInReminder = body == checkInReminderBody
         return isMarkedCheckInReminder || isCurrentRule || isLegacyCheckInReminder
+    }
+
+    static func shouldRemovePendingAccountNotification(
+        identifier: String,
+        userInfo: [AnyHashable: Any],
+        body: String,
+        currentRuleIDs: Set<String>
+    ) -> Bool {
+        shouldRemovePendingReminderRequest(
+            identifier: identifier,
+            userInfo: userInfo,
+            body: body,
+            currentRuleIDs: currentRuleIDs
+        ) || identifier.hasPrefix(sessionTimerNotificationPrefix)
     }
 
     func updateRemoteToken(_ token: String) {
