@@ -84,6 +84,15 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - name: Restore Firebase emulator cache
+        if: steps.changes.outputs.backend_changed == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/firebase/emulators
+          key: ${{ runner.os }}-firebase-emulators-${{ hashFiles('backend/functions/package.json', 'firebase.json') }}
+          restore-keys: |
+            ${{ runner.os }}-firebase-emulators-
+
       - name: Install dependencies
         if: steps.changes.outputs.backend_changed == 'true'
         run: npm ci
