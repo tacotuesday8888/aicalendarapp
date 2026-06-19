@@ -189,9 +189,12 @@ final class SettingsViewModel: ObservableObject {
                 analyticsService.track(event: "notification_remote_token_cleared")
             }
             try await authService.signOut()
-            let cancelledCount = await notificationService.cancelReminderNotifications()
+            let cancelledCount = await notificationService.cancelLocalAccountNotifications()
             if cancelledCount > 0 {
-                analyticsService.track(event: "notification_reminders_cancelled", parameters: ["count": cancelledCount])
+                analyticsService.track(
+                    event: "notification_local_account_notifications_cancelled",
+                    parameters: ["count": cancelledCount]
+                )
             }
         } catch {
             statusMessage = AppError.wrap(error, fallback: "Unable to sign out.").errorDescription ?? ""
@@ -208,9 +211,12 @@ final class SettingsViewModel: ObservableObject {
             try await backendFunctionService.deleteUserAccount(UserJobRequestPayload(userID: profile.id))
             await databaseService.deleteLocalData(for: profile.id)
             try await authService.signOut()
-            let cancelledCount = await notificationService.cancelReminderNotifications()
+            let cancelledCount = await notificationService.cancelLocalAccountNotifications()
             if cancelledCount > 0 {
-                analyticsService.track(event: "notification_reminders_cancelled", parameters: ["count": cancelledCount])
+                analyticsService.track(
+                    event: "notification_local_account_notifications_cancelled",
+                    parameters: ["count": cancelledCount]
+                )
             }
         } catch {
             statusMessage = AppError.wrap(error, fallback: "Unable to delete the account.").errorDescription ?? ""

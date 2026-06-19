@@ -99,6 +99,7 @@ protocol NotificationServicing: AnyObject {
     func schedule(rule: ReminderRule) async throws
     func syncReminderRules(_ rules: [ReminderRule]) async throws -> Int
     func cancelReminderNotifications() async -> Int
+    func cancelLocalAccountNotifications() async -> Int
     func clearRemoteToken(for userID: String) async -> Bool
     func updateRemoteToken(_ token: String)
 }
