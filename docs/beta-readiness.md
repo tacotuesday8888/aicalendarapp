@@ -58,9 +58,10 @@ npm --prefix backend/functions run deploy:backend
 
 Do not use a Functions-only deploy for beta unless rules and indexes have already been deployed from the same commit.
 
-6. Keep the custom Functions runtime variable `APP_CHECK_MODE=monitor` until debug tokens and App Attest are verified in Firebase App Check. Move to `APP_CHECK_MODE=enforce` only after signed builds send valid App Check tokens. The backend accepts only explicit `off`, `monitor`, or `enforce` mode families; a misspelled `APP_CHECK_MODE` fails closed as a configuration error instead of silently falling back to monitor mode.
-7. Separately monitor and enable Firebase product-level App Check enforcement in the Firebase Console for each supported product that exposes enforcement controls, including Cloud Functions, Firestore, Storage, and Auth/Identity flows. The `APP_CHECK_MODE` variable only controls the app's custom HTTPS Functions guard; it does not enable product enforcement by itself.
-8. Production/TestFlight AI config must use:
+6. Add the deployed Functions base URL to `Secrets.xcconfig` as both `API_BASE_URL` and `AI_API_BASE_URL`, usually `https://<region>-<project-id>.cloudfunctions.net`. Non-debug iOS builds fail at launch if either value is missing, because account export/delete, RevenueCat sync, syllabus import, and AI workflows require these endpoints.
+7. Keep the custom Functions runtime variable `APP_CHECK_MODE=monitor` until debug tokens and App Attest are verified in Firebase App Check. Move to `APP_CHECK_MODE=enforce` only after signed builds send valid App Check tokens. The backend accepts only explicit `off`, `monitor`, or `enforce` mode families; a misspelled `APP_CHECK_MODE` fails closed as a configuration error instead of silently falling back to monitor mode.
+8. Separately monitor and enable Firebase product-level App Check enforcement in the Firebase Console for each supported product that exposes enforcement controls, including Cloud Functions, Firestore, Storage, and Auth/Identity flows. The `APP_CHECK_MODE` variable only controls the app's custom HTTPS Functions guard; it does not enable product enforcement by itself.
+9. Production/TestFlight AI config must use:
 
 ```text
 AI_PROVIDER=vertex

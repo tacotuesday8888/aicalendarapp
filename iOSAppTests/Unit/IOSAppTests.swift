@@ -892,6 +892,36 @@ struct IOSAppTests {
         )
     }
 
+    @Test func backendEndpointValidationRequiresBothFunctionBaseURLs() {
+        let functionsURL = URL(string: "https://us-central1-demo.cloudfunctions.net")!
+        let aiURL = URL(string: "https://us-central1-demo.cloudfunctions.net")!
+
+        #expect(
+            AppConfiguration.validateBackendEndpoints(
+                apiBaseURL: functionsURL,
+                aiAPIBaseURL: aiURL
+            ) == .valid
+        )
+        #expect(
+            AppConfiguration.validateBackendEndpoints(
+                apiBaseURL: nil,
+                aiAPIBaseURL: aiURL
+            ) == .missingRequiredURLs(["APIBaseURL"])
+        )
+        #expect(
+            AppConfiguration.validateBackendEndpoints(
+                apiBaseURL: functionsURL,
+                aiAPIBaseURL: nil
+            ) == .missingRequiredURLs(["AIAPIBaseURL"])
+        )
+        #expect(
+            AppConfiguration.validateBackendEndpoints(
+                apiBaseURL: nil,
+                aiAPIBaseURL: nil
+            ) == .missingRequiredURLs(["APIBaseURL", "AIAPIBaseURL"])
+        )
+    }
+
     @Test func goalPlanGenerationRequiresLiveBackend() async throws {
         let service = GoalService()
         service.backendFunctionService = BackendFunctionService()

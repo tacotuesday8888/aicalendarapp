@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         configureGlobalAppearance()
         configureFirebaseIfAvailable()
         configureGoogleSignInIfAvailable()
+        validateBackendEndpointsIfAvailable()
         configureRevenueCatIfAvailable()
         configureSuperwallIfAvailable()
         configureNotifications(for: application)
@@ -249,6 +250,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #else
         logger.notice("Google Sign-In SDK not linked.")
         #endif
+    }
+
+    private func validateBackendEndpointsIfAvailable() {
+        let validation = AppConfiguration.validateBackendEndpoints(
+            apiBaseURL: configuration.apiBaseURL,
+            aiAPIBaseURL: configuration.aiAPIBaseURL
+        )
+        guard validation == .valid else {
+            let failureReason = validation.failureReason ?? "Backend endpoint configuration is invalid."
+            #if DEBUG
+            logger.notice(failureReason)
+            return
+            #else
+            fatalError(failureReason)
+            #endif
+        }
+
+        logger.info("Validated backend endpoint configuration.")
     }
 }
 
