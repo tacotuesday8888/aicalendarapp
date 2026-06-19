@@ -14,6 +14,7 @@ type AssistantDraftRecord = {
   kind: "goalPlan" | "plannerAdjustment" | "sessionEvaluation" | "checkInSummary";
   title: string;
   detail: string;
+  dueAt?: string | null;
 };
 
 export async function storeReviewDraft(
@@ -87,7 +88,8 @@ export async function storeAssistantChatReviewState(
     id: assistantDraftArtifactID(draftID, timestamp, index),
     kind: assistantDraftKind(action.type),
     title: action.title,
-    detail: action.dueAt ? `${action.reason} Suggested time: ${action.dueAt}` : action.reason
+    detail: action.dueAt ? `${action.reason} Suggested time: ${action.dueAt}` : action.reason,
+    dueAt: action.dueAt?.trim() || null
   }));
 
   await Promise.all([
