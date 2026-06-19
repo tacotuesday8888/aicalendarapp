@@ -2501,7 +2501,30 @@ struct IOSAppTests {
         #expect(analyticsService.events.contains("notification_permission_denied"))
     }
 
-    @Test func settingsViewModelReportsCalendarPermissionFailureDuringLoad() async {
+    @Test func settingsViewModelLoadDoesNotRequestCalendarAccessAutomatically() async {
+        let profile = testProfile(id: uniqueUserID("settings-calendar-no-auto-prompt"))
+        let calendarSyncService = TestCalendarSyncService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: TestUserService(profile: profile),
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+
+        await viewModel.load()
+
+        #expect(calendarSyncService.availableCalendarRequestCount == 0)
+        #expect(viewModel.availableCalendars.isEmpty)
+        #expect(analyticsService.screens == ["settings"])
+    }
+
+    @Test func settingsViewModelReportsCalendarPermissionFailureDuringExplicitLoad() async {
         let profile = testProfile(id: uniqueUserID("settings-calendar-load-denied"))
         let calendarSyncService = TestCalendarSyncService()
         calendarSyncService.availableCalendarsError = AppError.permissionDenied("calendar access")
@@ -2517,8 +2540,9 @@ struct IOSAppTests {
             analyticsService: TestAnalyticsService()
         )
 
-        await viewModel.load()
+        await viewModel.loadCalendars()
 
+        #expect(calendarSyncService.availableCalendarRequestCount == 1)
         #expect(viewModel.availableCalendars.isEmpty)
         #expect(viewModel.statusMessage == "Permission for calendar access was denied.")
     }
