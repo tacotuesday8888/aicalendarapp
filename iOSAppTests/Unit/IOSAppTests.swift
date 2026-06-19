@@ -895,6 +895,8 @@ struct IOSAppTests {
     @Test func backendEndpointValidationRequiresBothFunctionBaseURLs() {
         let functionsURL = URL(string: "https://us-central1-demo.cloudfunctions.net")!
         let aiURL = URL(string: "https://us-central1-demo.cloudfunctions.net")!
+        let placeholderURL = URL(string: "https://us-central1-your-project-id.cloudfunctions.net")!
+        let insecureURL = URL(string: "http://us-central1-demo.cloudfunctions.net")!
 
         #expect(
             AppConfiguration.validateBackendEndpoints(
@@ -919,6 +921,24 @@ struct IOSAppTests {
                 apiBaseURL: nil,
                 aiAPIBaseURL: nil
             ) == .missingRequiredURLs(["APIBaseURL", "AIAPIBaseURL"])
+        )
+        #expect(
+            AppConfiguration.validateBackendEndpoints(
+                apiBaseURL: placeholderURL,
+                aiAPIBaseURL: aiURL
+            ) == .placeholderURLs(["APIBaseURL"])
+        )
+        #expect(
+            AppConfiguration.validateBackendEndpoints(
+                apiBaseURL: functionsURL,
+                aiAPIBaseURL: placeholderURL
+            ) == .placeholderURLs(["AIAPIBaseURL"])
+        )
+        #expect(
+            AppConfiguration.validateBackendEndpoints(
+                apiBaseURL: insecureURL,
+                aiAPIBaseURL: aiURL
+            ) == .unsupportedURLScheme(["APIBaseURL"])
         )
     }
 
