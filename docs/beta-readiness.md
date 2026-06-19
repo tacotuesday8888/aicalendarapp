@@ -75,7 +75,7 @@ RevenueCat is the subscription source of truth. Superwall handles placements and
 
 1. In RevenueCat, create the iOS app and entitlement named exactly `aiefficiencyapp Pro`, unless all app/backend config is changed to the new exact name.
 2. Add monthly and annual products after App Store Connect product IDs exist.
-3. Add the RevenueCat public iOS SDK key to `Secrets.xcconfig` as `REVENUECAT_API_KEY`.
+3. Add the RevenueCat public iOS SDK key to `Secrets.xcconfig` as `REVENUECAT_API_KEY`; release builds must use the platform-specific iOS public SDK key (`appl_...`), not a Test Store key, secret API key (`sk_...`), or OAuth token (`atk_...`).
 4. Add the RevenueCat secret API key to Functions runtime as `REVENUECAT_SECRET_API_KEY`.
 5. Configure the RevenueCat webhook URL to the deployed `revenueCatWebhook` function.
 6. Set the RevenueCat webhook Authorization header and store the same exact value as `REVENUECAT_WEBHOOK_SECRET`.

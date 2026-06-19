@@ -120,22 +120,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     private func configureRevenueCatIfAvailable() {
         let apiKey = configuration.revenueCatAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !apiKey.isEmpty else {
+        #if DEBUG
+        let validation = AppConfiguration.validateRevenueCatAPIKey(apiKey, allowsTestStoreKey: true)
+        #else
+        let validation = AppConfiguration.validateRevenueCatAPIKey(apiKey, allowsTestStoreKey: false)
+        #endif
+        guard validation == .valid else {
+            let failureReason = validation.failureReason ?? "RevenueCat API key is invalid."
             #if DEBUG
-            logger.notice("RevenueCat API key missing from configuration.")
+            logger.notice(failureReason)
             return
             #else
-            fatalError("RevenueCat API key is required for non-debug builds.")
+            fatalError(failureReason)
             #endif
         }
 
         #if canImport(RevenueCat)
-        #if !DEBUG
-        guard !apiKey.hasPrefix("test_") else {
-            fatalError("RevenueCat Test Store API key cannot be used in non-debug builds.")
-        }
-        #endif
-
         #if DEBUG
         Purchases.logLevel = .debug
         #else

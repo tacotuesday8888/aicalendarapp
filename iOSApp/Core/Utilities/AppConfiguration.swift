@@ -1,6 +1,35 @@
 import Foundation
 
 struct AppConfiguration: Sendable {
+    enum RevenueCatAPIKeyValidation: Equatable, Sendable {
+        case valid
+        case missing
+        case secretAPIKey
+        case oauthToken
+        case testStoreKeyNotAllowed
+        case placeholderKey
+        case unsupportedPublicSDKKey
+
+        var failureReason: String? {
+            switch self {
+            case .valid:
+                return nil
+            case .missing:
+                return "RevenueCat API key is required."
+            case .secretAPIKey:
+                return "RevenueCat secret API keys must stay on the backend and cannot be used by the iOS app."
+            case .oauthToken:
+                return "RevenueCat OAuth access tokens cannot be used by the iOS app."
+            case .testStoreKeyNotAllowed:
+                return "RevenueCat Test Store API key cannot be used in non-debug builds."
+            case .placeholderKey:
+                return "RevenueCat API key must be replaced with a real RevenueCat key before launch."
+            case .unsupportedPublicSDKKey:
+                return "RevenueCat release builds must use the platform-specific iOS public SDK key."
+            }
+        }
+    }
+
     static let shared = AppConfiguration(bundle: .main)
 
     let bundleID: String
@@ -61,5 +90,34 @@ struct AppConfiguration: Sendable {
             return nil
         }
         return url
+    }
+
+    static func validateRevenueCatAPIKey(
+        _ rawAPIKey: String,
+        allowsTestStoreKey: Bool
+    ) -> RevenueCatAPIKeyValidation {
+        let apiKey = rawAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty else {
+            return .missing
+        }
+
+        if apiKey.hasPrefix("sk_") {
+            return .secretAPIKey
+        }
+
+        if apiKey.hasPrefix("atk_") {
+            return .oauthToken
+        }
+
+        if apiKey.hasPrefix("test_") {
+            return allowsTestStoreKey ? .valid : .testStoreKeyNotAllowed
+        }
+
+        let lowercaseAPIKey = apiKey.lowercased()
+        if lowercaseAPIKey.contains("your_") || lowercaseAPIKey.contains("placeholder") {
+            return .placeholderKey
+        }
+
+        return apiKey.hasPrefix("appl_") ? .valid : .unsupportedPublicSDKKey
     }
 }

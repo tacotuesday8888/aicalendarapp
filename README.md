@@ -32,7 +32,7 @@ These files are intentionally ignored by Git:
 
 - `.firebaserc` - local Firebase project aliases.
 - `iOSApp/Resources/Config/GoogleService-Info.plist` - real Firebase iOS app config.
-- `iOSApp/Resources/Config/Secrets.xcconfig` - local app secrets and service IDs.
+- `iOSApp/Resources/Config/Secrets.xcconfig` - local iOS client config and public service IDs; backend secrets stay in Functions runtime config.
 - `backend/functions/.env.*` - local Firebase Functions environment files.
 
 Use the templates in the repo as starting points:
