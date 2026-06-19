@@ -262,6 +262,9 @@ private final class AICalendarRevenueCatPurchaseController: PurchaseController {
     @MainActor
     func purchase(product: SuperwallKit.StoreProduct) async -> PurchaseResult {
         do {
+            let userID = try currentUserIDForPurchase()
+            try await AppContainer.shared.subscriptionService.prepareForPaidAccess(for: userID)
+
             let revenueCatProduct: RevenueCat.StoreProduct
             if let sk2Product = product.sk2Product {
                 revenueCatProduct = RevenueCat.StoreProduct(sk2Product: sk2Product)
@@ -275,8 +278,15 @@ private final class AICalendarRevenueCatPurchaseController: PurchaseController {
             case .cancelled:
                 return .cancelled
             case .purchased:
-                syncSubscriptionStatus(customerInfo: result.customerInfo)
-                return .purchased
+                do {
+                    let state = try await AppContainer.shared.subscriptionService.confirmPaidAccess(for: userID)
+                    syncSubscriptionStatus(state: state)
+                    return .purchased
+                } catch {
+                    Superwall.shared.subscriptionStatus = .unknown
+                    AppContainer.shared.analyticsService.record(error: error, context: "superwall_purchase_backend_confirmation")
+                    return .pending
+                }
             }
         } catch let error as RevenueCat.ErrorCode {
             return error == .paymentPendingError ? .pending : .failed(error)
@@ -288,8 +298,17 @@ private final class AICalendarRevenueCatPurchaseController: PurchaseController {
     @MainActor
     func restorePurchases() async -> RestorationResult {
         do {
+            let userID = try currentUserIDForPurchase()
+            try await AppContainer.shared.subscriptionService.prepareForPaidAccess(for: userID)
             let customerInfo = try await Purchases.shared.restorePurchases()
-            syncSubscriptionStatus(customerInfo: customerInfo)
+            if hasActiveEntitlement(customerInfo: customerInfo) {
+                let state = try await AppContainer.shared.subscriptionService.confirmPaidAccess(for: userID)
+                syncSubscriptionStatus(state: state)
+            } else if let state = try? await AppContainer.shared.subscriptionService.refreshStatus(for: userID) {
+                syncSubscriptionStatus(state: state)
+            } else {
+                Superwall.shared.subscriptionStatus = .inactive
+            }
             return .restored
         } catch {
             return .failed(error)
@@ -299,31 +318,41 @@ private final class AICalendarRevenueCatPurchaseController: PurchaseController {
     func syncSubscriptionStatus() {
         Task { @MainActor in
             do {
-                let customerInfo = try await Purchases.shared.customerInfo()
-                syncSubscriptionStatus(customerInfo: customerInfo)
+                let userID = try currentUserIDForPurchase()
+                let state = try await AppContainer.shared.subscriptionService.refreshStatus(for: userID)
+                syncSubscriptionStatus(state: state)
             } catch {
                 Superwall.shared.subscriptionStatus = .unknown
+                AppContainer.shared.analyticsService.record(error: error, context: "superwall_subscription_status_sync")
             }
         }
     }
 
     @MainActor
-    private func syncSubscriptionStatus(customerInfo: RevenueCat.CustomerInfo) {
-        let entitlement = customerInfo.entitlements[entitlementID]
-        Superwall.shared.subscriptionStatus = entitlement?.isActive == true
+    private func syncSubscriptionStatus(state: SubscriptionState) {
+        Superwall.shared.subscriptionStatus = state.entitlement == .active
             ? .active([Entitlement(id: entitlementID)])
             : .inactive
+    }
+
+    private func currentUserIDForPurchase() throws -> String {
+        guard let userID = AppContainer.shared.authService.currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !userID.isEmpty else {
+            throw AppError.invalidCredentials
+        }
+
+        return userID
+    }
+
+    private func hasActiveEntitlement(customerInfo: RevenueCat.CustomerInfo) -> Bool {
+        customerInfo.entitlements[entitlementID]?.isActive == true
     }
 }
 #endif
 
 #if canImport(RevenueCat)
 extension AppDelegate: PurchasesDelegate {
-    func purchases(_ purchases: Purchases, receivedUpdated customerInfo: RevenueCat.CustomerInfo) {
-        #if canImport(SuperwallKit)
-        superwallPurchaseController?.syncSubscriptionStatus()
-        #endif
-        guard let userID = AppContainer.shared.authService.currentUserID else { return }
+    func purchases(_: Purchases, receivedUpdated _: RevenueCat.CustomerInfo) {
+        guard let userID = AppContainer.shared.authService.currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !userID.isEmpty else { return }
         Task {
             do {
                 _ = try await AppContainer.shared.subscriptionService.refreshStatus(for: userID)

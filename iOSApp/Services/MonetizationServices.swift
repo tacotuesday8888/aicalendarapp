@@ -35,6 +35,28 @@ actor LocalSubscriptionStore {
     }
 }
 
+enum SubscriptionStateResolver {
+    static func resolveBackendState(
+        backendState: SubscriptionState?,
+        localState: SubscriptionState,
+        previousState: SubscriptionState
+    ) -> SubscriptionState {
+        if let backendState {
+            return backendState
+        }
+
+        if localState.entitlement == .active {
+            return previousState.entitlement == .active ? previousState : .locked
+        }
+
+        return localState
+    }
+
+    static func pendingPaidAccessState(previousState: SubscriptionState) -> SubscriptionState {
+        previousState.entitlement == .active ? previousState : .locked
+    }
+}
+
 actor LinkedSubscriptionIdentityStore {
     private var linkedUserID: String?
     private var pendingUserID: String?
@@ -71,9 +93,14 @@ final class SubscriptionService: SubscriptionServicing {
 
     var analyticsService: AnalyticsServicing?
     var backendFunctionService: BackendFunctionServicing?
+    private let paidAccessConfirmationRetryDelaysNanoseconds: [UInt64]
     private let store = LocalSubscriptionStore()
     private let identityStore = LinkedSubscriptionIdentityStore()
     private let logger = AppLogger(category: "subscription-identity")
+
+    init(paidAccessConfirmationRetryDelaysNanoseconds: [UInt64] = [1_000_000_000, 2_000_000_000]) {
+        self.paidAccessConfirmationRetryDelaysNanoseconds = paidAccessConfirmationRetryDelaysNanoseconds
+    }
 
     func observeSubscriptionState(for userID: String) -> AsyncStream<SubscriptionState> {
         AsyncStream { continuation in
@@ -112,6 +139,7 @@ final class SubscriptionService: SubscriptionServicing {
         guard Purchases.isConfigured else {
             if let backendState = await syncBackendSubscriptionStatus(for: userID) {
                 await store.set(backendState, for: userID)
+                await syncSuperwallSubscriptionStatus(backendState)
                 return backendState
             }
             try ensureRevenueCatConfigured()
@@ -121,9 +149,10 @@ final class SubscriptionService: SubscriptionServicing {
         let customerInfo = try await fetchCustomerInfo()
         let offerings = try? await fetchOfferings()
         let mapped = map(customerInfo, currentOffering: offerings?.current, fallbackPlan: previousState.activePlan)
-        let resolved = resolveBackendState(
-            await syncBackendSubscriptionStatus(for: userID),
-            localState: mapped
+        let resolved = SubscriptionStateResolver.resolveBackendState(
+            backendState: await syncBackendSubscriptionStatus(for: userID),
+            localState: mapped,
+            previousState: previousState
         )
         await store.set(resolved, for: userID)
         await syncSuperwallSubscriptionStatus(resolved)
@@ -142,6 +171,8 @@ final class SubscriptionService: SubscriptionServicing {
     func purchase(plan: SubscriptionPlan, for userID: String) async throws -> SubscriptionState {
         #if canImport(RevenueCat)
         try ensureRevenueCatConfigured()
+        try await ensureRevenueCatUserLinked(userID)
+        let previousState = await store.currentState(for: userID)
         let offerings = try await fetchOfferings()
 
         guard
@@ -154,11 +185,23 @@ final class SubscriptionService: SubscriptionServicing {
         let customerInfo = try await purchase(package: package)
 
         let mapped = map(customerInfo, currentOffering: current, fallbackPlan: plan)
-        let state = resolveBackendState(
-            await syncBackendSubscriptionStatus(for: userID),
-            localState: mapped
-        )
-        analyticsService?.track(event: "subscription_purchased", parameters: ["plan": plan.rawValue])
+        let state: SubscriptionState
+        do {
+            state = try await requireBackendConfirmation(for: userID, localState: mapped)
+            analyticsService?.track(event: "subscription_purchased", parameters: [
+                "plan": plan.rawValue,
+                "backend_confirmed": true
+            ])
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            analyticsService?.record(error: error, context: "subscription_purchase_backend_confirmation")
+            analyticsService?.track(event: "subscription_purchased", parameters: [
+                "plan": plan.rawValue,
+                "backend_confirmed": false
+            ])
+            state = SubscriptionStateResolver.pendingPaidAccessState(previousState: previousState)
+        }
         await store.set(state, for: userID)
         await syncSuperwallSubscriptionStatus(state)
         return state
@@ -170,14 +213,12 @@ final class SubscriptionService: SubscriptionServicing {
     func restore(for userID: String) async throws -> SubscriptionState {
         #if canImport(RevenueCat)
         try ensureRevenueCatConfigured()
+        try await ensureRevenueCatUserLinked(userID)
         let previousState = await store.currentState(for: userID)
         let customerInfo = try await restorePurchases()
         let offerings = try? await fetchOfferings()
         let mapped = map(customerInfo, currentOffering: offerings?.current, fallbackPlan: previousState.activePlan)
-        let state = resolveBackendState(
-            await syncBackendSubscriptionStatus(for: userID),
-            localState: mapped
-        )
+        let state = try await requireBackendConfirmation(for: userID, localState: mapped)
         await store.set(state, for: userID)
         await syncSuperwallSubscriptionStatus(state)
         return state
@@ -188,9 +229,12 @@ final class SubscriptionService: SubscriptionServicing {
 
     func linkUser(_ userID: String) async {
         let currentLinkedUserID = await identityStore.currentLinkedUserID()
-        guard currentLinkedUserID != userID else { return }
 
         #if canImport(RevenueCat)
+        if currentLinkedUserID == userID, Purchases.isConfigured, Purchases.shared.appUserID.trimmingCharacters(in: .whitespacesAndNewlines) == userID {
+            return
+        }
+
         guard Purchases.isConfigured else {
             logger.notice("linkUser called before RevenueCat was configured; skipping.")
             identifySuperwallUser(userID)
@@ -198,24 +242,7 @@ final class SubscriptionService: SubscriptionServicing {
             return
         }
         do {
-            let revenueCatUserID = Purchases.shared.appUserID.trimmingCharacters(in: .whitespacesAndNewlines)
-            if revenueCatUserID == userID {
-                identifySuperwallUser(userID)
-                await identityStore.markLinked(userID)
-                return
-            }
-
-            let isSwitchingUser = currentLinkedUserID != nil || !Purchases.shared.isAnonymous
-            let result = try await Purchases.shared.logIn(userID)
-            if isSwitchingUser {
-                resetSuperwallUser()
-            }
-            identifySuperwallUser(userID)
-            await identityStore.markLinked(userID)
-            analyticsService?.track(event: "subscription_user_linked", parameters: [
-                "created": result.created,
-                "switched": isSwitchingUser
-            ])
+            try await ensureRevenueCatUserLinked(userID)
         } catch {
             analyticsService?.record(error: error, context: "subscription_link_user")
         }
@@ -256,25 +283,76 @@ final class SubscriptionService: SubscriptionServicing {
         #endif
     }
 
-    private func syncBackendSubscriptionStatus(for userID: String) async -> SubscriptionState? {
-        guard let backendFunctionService else { return nil }
+    func prepareForPaidAccess(for userID: String) async throws {
+        #if canImport(RevenueCat)
+        try ensureRevenueCatConfigured()
+        try await ensureRevenueCatUserLinked(userID)
+        #else
+        throw AppError.integrationUnavailable("RevenueCat")
+        #endif
+    }
 
+    func confirmPaidAccess(for userID: String) async throws -> SubscriptionState {
+        var lastInactiveState: SubscriptionState?
+        var lastError: Error?
+        let attemptCount = paidAccessConfirmationRetryDelaysNanoseconds.count + 1
+
+        for attemptIndex in 0..<attemptCount {
+            do {
+                let state = try await syncBackendSubscriptionStatusOrThrow(for: userID)
+                guard state.entitlement == .active else {
+                    lastInactiveState = state
+                    lastError = nil
+                    try await sleepBeforeNextPaidAccessConfirmationAttempt(attemptIndex)
+                    continue
+                }
+
+                await store.set(state, for: userID)
+                await syncSuperwallSubscriptionStatus(state)
+                return state
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+                try await sleepBeforeNextPaidAccessConfirmationAttempt(attemptIndex)
+            }
+        }
+
+        if let lastError, lastInactiveState == nil {
+            throw lastError
+        }
+
+        throw AppError.network(description: "Your purchase was processed, but Pro access has not been confirmed on the server yet. Try restoring purchases in a moment.")
+    }
+
+    private func syncBackendSubscriptionStatus(for userID: String) async -> SubscriptionState? {
         do {
-            return try await backendFunctionService.syncSubscriptionStatus(UserJobRequestPayload(userID: userID))
+            return try await syncBackendSubscriptionStatusOrThrow(for: userID)
         } catch {
             analyticsService?.record(error: error, context: "subscription_backend_sync")
             return nil
         }
     }
 
-    private func resolveBackendState(_ backendState: SubscriptionState?, localState: SubscriptionState) -> SubscriptionState {
-        guard let backendState else { return localState }
-
-        if localState.entitlement == .active && backendState.entitlement != .active {
-            return localState
+    private func syncBackendSubscriptionStatusOrThrow(for userID: String) async throws -> SubscriptionState {
+        guard let backendFunctionService else {
+            throw AppError.integrationUnavailable("Firebase Functions")
         }
 
-        return backendState
+        return try await backendFunctionService.syncSubscriptionStatus(UserJobRequestPayload(userID: userID))
+    }
+
+    private func requireBackendConfirmation(for userID: String, localState: SubscriptionState) async throws -> SubscriptionState {
+        guard localState.entitlement == .active else {
+            return await syncBackendSubscriptionStatus(for: userID) ?? localState
+        }
+
+        return try await confirmPaidAccess(for: userID)
+    }
+
+    private func sleepBeforeNextPaidAccessConfirmationAttempt(_ attemptIndex: Int) async throws {
+        guard attemptIndex < paidAccessConfirmationRetryDelaysNanoseconds.count else { return }
+        try await Task.sleep(nanoseconds: paidAccessConfirmationRetryDelaysNanoseconds[attemptIndex])
     }
 
     #if canImport(RevenueCat)
@@ -286,6 +364,28 @@ final class SubscriptionService: SubscriptionServicing {
         guard Purchases.isConfigured else {
             throw AppError.integrationUnavailable("RevenueCat")
         }
+    }
+
+    private func ensureRevenueCatUserLinked(_ userID: String) async throws {
+        let revenueCatUserID = Purchases.shared.appUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if revenueCatUserID == userID {
+            identifySuperwallUser(userID)
+            await identityStore.markLinked(userID)
+            return
+        }
+
+        let currentLinkedUserID = await identityStore.currentLinkedUserID()
+        let isSwitchingUser = currentLinkedUserID != nil || !Purchases.shared.isAnonymous
+        let result = try await Purchases.shared.logIn(userID)
+        if isSwitchingUser {
+            resetSuperwallUser()
+        }
+        identifySuperwallUser(userID)
+        await identityStore.markLinked(userID)
+        analyticsService?.track(event: "subscription_user_linked", parameters: [
+            "created": result.created,
+            "switched": isSwitchingUser
+        ])
     }
 
     private func fetchCustomerInfo() async throws -> RevenueCat.CustomerInfo {

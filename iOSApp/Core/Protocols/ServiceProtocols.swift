@@ -116,6 +116,8 @@ protocol SubscriptionServicing: AnyObject {
     func restore(for userID: String) async throws -> SubscriptionState
     func linkUser(_ userID: String) async
     func unlinkUser() async
+    func prepareForPaidAccess(for userID: String) async throws
+    func confirmPaidAccess(for userID: String) async throws -> SubscriptionState
 }
 
 protocol PaywallServicing: AnyObject {
