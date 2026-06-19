@@ -19,6 +19,7 @@ type AssistantDraftRecord = {
   kind: "goalPlan" | "plannerAdjustment" | "sessionEvaluation" | "checkInSummary";
   title: string;
   detail: string;
+  dueAt?: string;
 };
 
 type AssistantDraftArtifactSnapshot = {
@@ -206,6 +207,7 @@ function assistantDraftRecordFromData(id: string, data: unknown): AssistantDraft
   const kind = assistantDraftKindFromValue(record.kind);
   const title = stringValue(record.title);
   const detail = stringValue(record.detail);
+  const dueAt = stringValue(record.dueAt) ?? suggestedTimeFromDetail(detail);
 
   if (!kind || !title || !detail) {
     throw new HttpsError("failed-precondition", "Draft artifact is incomplete.");
@@ -215,8 +217,23 @@ function assistantDraftRecordFromData(id: string, data: unknown): AssistantDraft
     id,
     kind,
     title,
-    detail
+    detail,
+    ...(dueAt ? { dueAt } : {})
   };
+}
+
+function suggestedTimeFromDetail(detail: string | undefined): string | undefined {
+  if (!detail) {
+    return undefined;
+  }
+
+  const marker = "Suggested time:";
+  const markerIndex = detail.lastIndexOf(marker);
+  if (markerIndex === -1) {
+    return undefined;
+  }
+
+  return stringValue(detail.slice(markerIndex + marker.length));
 }
 
 function assistantDraftKindFromValue(value: unknown): AssistantDraftRecord["kind"] | null {
@@ -258,8 +275,7 @@ async function applyDraftAction(userID: string, action: AssistantDraftRecord) {
     }
     case "plannerAdjustment": {
       const blockRef = userScopedCollection(userID, "plannerBlocks").doc(action.id);
-      const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+      const { startDate, endDate } = plannerBlockWindowForDraftAction(action);
       await blockRef.set(
         {
           id: blockRef.id,
@@ -282,6 +298,25 @@ async function applyDraftAction(userID: string, action: AssistantDraftRecord) {
     default:
       throw new HttpsError("invalid-argument", "Unsupported assistant draft action.");
   }
+}
+
+export function plannerBlockWindowForDraftAction(
+  action: Pick<AssistantDraftRecord, "dueAt">,
+  fallbackStartDate: Date = new Date()
+): { startDate: Date; endDate: Date } {
+  const startDate = action.dueAt ? parseDraftDueAt(action.dueAt) : fallbackStartDate;
+  return {
+    startDate,
+    endDate: new Date(startDate.getTime() + 60 * 60 * 1000)
+  };
+}
+
+function parseDraftDueAt(dueAt: string): Date {
+  const parsed = new Date(dueAt);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new HttpsError("invalid-argument", "Draft suggested time is invalid.");
+  }
+  return parsed;
 }
 
 async function resolveGoalIDForDraftAction(userID: string, action: AssistantDraftRecord): Promise<string> {

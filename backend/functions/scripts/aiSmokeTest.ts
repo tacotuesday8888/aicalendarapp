@@ -14,7 +14,7 @@ import {
   syllabusImportFlow,
   vibeFeedbackFlow
 } from "../src/ai/workflows.js";
-import { commitAssistantDraftRecord } from "../src/ai/assistant.js";
+import { commitAssistantDraftRecord, plannerBlockWindowForDraftAction } from "../src/ai/assistant.js";
 import {
   assistantChatResultSchema,
   goalPlanGenerationResultSchema,
@@ -513,6 +513,16 @@ function assertSubscriptionSnapshotFreshnessContract() {
 
 async function assertAssistantDraftCommitContract() {
   const failedCommitCalls: string[] = [];
+  const plannerWindow = plannerBlockWindowForDraftAction(
+    { dueAt: "2026-04-27T14:30:00.000Z" },
+    new Date("2026-04-26T12:00:00.000Z")
+  );
+  assert.equal(plannerWindow.startDate.toISOString(), "2026-04-27T14:30:00.000Z");
+  assert.equal(plannerWindow.endDate.toISOString(), "2026-04-27T15:30:00.000Z");
+  assert.throws(
+    () => plannerBlockWindowForDraftAction({ dueAt: "tomorrow at nine" }),
+    /Draft suggested time is invalid/
+  );
 
   await assert.rejects(
     () =>
@@ -576,12 +586,14 @@ async function assertAssistantDraftCommitContract() {
           data: {
             kind: "plannerAdjustment",
             title: "Stored draft title",
-            detail: "Stored draft detail"
+            detail: "Stored draft detail",
+            dueAt: "2026-04-27T14:30:00.000Z"
           }
         };
       },
       applyDraftAction: async (action) => {
         successfulCommitCalls.push(`apply:${action.title}`);
+        successfulCommitCalls.push(`dueAt:${action.dueAt ?? "missing"}`);
       },
       updateAssistantThreadAfterCommit: async () => {
         successfulCommitCalls.push("thread");
@@ -593,7 +605,7 @@ async function assertAssistantDraftCommitContract() {
   );
   assert.deepEqual(
     successfulCommitCalls,
-    ["load", "apply:Stored draft title", "thread", "confirm"],
+    ["load", "apply:Stored draft title", "dueAt:2026-04-27T14:30:00.000Z", "thread", "confirm"],
     "assistant draft commits must apply the stored artifact before confirming it"
   );
 }
