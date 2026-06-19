@@ -37,6 +37,7 @@ import {
   isBetaProUserID,
   nextWorkflowCountsForReservation
 } from "../src/ai/usagePolicy.js";
+import { logAIUsageBestEffort } from "../src/ai/usage.js";
 import { needsCrisisSafetyResponse, reviewVibeFeedbackForCrisis } from "../src/ai/safety.js";
 import {
   buildRevenueCatWebhookSnapshotPlan,
@@ -58,6 +59,7 @@ async function runSmokeTest() {
   assertAIConfigDefaults();
   assertPromptContracts();
   assertUsagePolicy();
+  await assertUsageLoggingContract();
   assertSubscriptionSyncContract();
   assertNotificationDispatchContract();
 
@@ -437,6 +439,31 @@ function assertUsagePolicy() {
   assert.throws(
     () => nextWorkflowCountsForReservation({ assistant_chat: 50, vibe_feedback: 1 }, "assistant_chat", 50),
     /daily AI limit for assistant_chat/
+  );
+}
+
+async function assertUsageLoggingContract() {
+  assert.equal(
+    await logAIUsageBestEffort(
+      "smoke-test-user",
+      "vibe_feedback",
+      "success",
+      { endpoint: "smoke-test" },
+      async () => undefined
+    ),
+    true
+  );
+  assert.equal(
+    await logAIUsageBestEffort(
+      "smoke-test-user",
+      "vibe_feedback",
+      "success",
+      { endpoint: "smoke-test" },
+      async () => {
+        throw new Error("simulated usage logging failure");
+      }
+    ),
+    false
   );
 }
 

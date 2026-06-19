@@ -19,7 +19,7 @@ import {
   vibeFeedbackFlow
 } from "./workflows.js";
 import { aiRunRequestSchema, type AIRunRequest, type AIWorkflow } from "./schemas.js";
-import { authorizeAndReserveAIUsage, logAIUsage } from "./usage.js";
+import { authorizeAndReserveAIUsage, logAIUsageBestEffort } from "./usage.js";
 
 type AIRunSuccess = {
   workflow: AIWorkflow;
@@ -78,12 +78,12 @@ export const ai = onRequest(aiFunctionOptions, async (request: Request, response
     }
 
     const result = await runAIWorkflow(authUID, parsedRequest);
-    await logAIUsage(authUID, parsedRequest.workflow, "success");
+    await logAIUsageBestEffort(authUID, parsedRequest.workflow, "success");
     response.status(200).json(result);
   } catch (error) {
     const workflow = parsedRequest?.workflow;
     if (authUID && workflow) {
-      await logAIUsage(authUID, workflow, "error", { errorCode: mapError(error).code }).catch(() => undefined);
+      await logAIUsageBestEffort(authUID, workflow, "error", { errorCode: mapError(error).code });
     }
 
     respondWithAIError(response, error);
@@ -137,13 +137,11 @@ async function streamAssistantChat(userID: string, request: Extract<AIRunRequest
     const result = await streamResponse.output;
     const draftID = await storeReviewDraft(userID, request.workflow, result);
     await storeAssistantChatReviewState(userID, request.payload, result, draftID);
-    await logAIUsage(userID, request.workflow, "success", { streamed: true });
+    await logAIUsageBestEffort(userID, request.workflow, "success", { streamed: true });
     writeSSE(response, "final", withDegradedFlag({ workflow: request.workflow, result, draftID }, result));
     response.end();
   } catch (error) {
-    await logAIUsage(userID, request.workflow, "error", { streamed: true, errorCode: mapError(error).code }).catch(
-      () => undefined
-    );
+    await logAIUsageBestEffort(userID, request.workflow, "error", { streamed: true, errorCode: mapError(error).code });
     writeSSE(response, "error", {
       error: {
         code: mapError(error).code,

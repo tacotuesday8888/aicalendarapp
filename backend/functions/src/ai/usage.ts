@@ -1,4 +1,5 @@
 import { HttpsError } from "firebase-functions/v2/https";
+import { logger } from "firebase-functions/v2";
 
 import { db, serverTimestamp, userDoc, userScopedCollection } from "../shared/firestore.js";
 import { getAIModelName, getAIProviderMode } from "./config.js";
@@ -48,6 +49,28 @@ export async function logAIUsage(
     ...metadata,
     createdAt: serverTimestamp()
   });
+}
+
+export async function logAIUsageBestEffort(
+  userID: string,
+  workflow: AIWorkflow,
+  status: "success" | "error",
+  metadata: Record<string, unknown> = {},
+  logUsage: typeof logAIUsage = logAIUsage
+): Promise<boolean> {
+  try {
+    await logUsage(userID, workflow, status, metadata);
+    return true;
+  } catch (error) {
+    logger.warn("Failed to log AI usage event.", {
+      userID,
+      workflow,
+      status,
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : null
+    });
+    return false;
+  }
 }
 
 async function reserveAIRateLimit(userID: string, workflow: AIWorkflow, maxPerDay: number) {

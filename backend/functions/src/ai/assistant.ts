@@ -12,7 +12,7 @@ import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 import { logLegacyAIEndpointUse } from "../shared/legacyInstrumentation.js";
 import { runAIWorkflow } from "./router.js";
-import { authorizeAndReserveAIUsage, logAIUsage } from "./usage.js";
+import { authorizeAndReserveAIUsage, logAIUsageBestEffort } from "./usage.js";
 
 type AssistantDraftRecord = {
   id: string;
@@ -62,10 +62,10 @@ export const assistantRespond = onAuthenticatedJsonRequest(assistantRequestSchem
       pendingDrafts: []
     });
 
-    await logAIUsage(userID, "assistant_chat", "success");
+    await logAIUsageBestEffort(userID, "assistant_chat", "success");
     return { thread };
   } catch (error) {
-    await logAIUsage(userID, "assistant_chat", "error", { endpoint: "assistantRespond" }).catch(() => undefined);
+    await logAIUsageBestEffort(userID, "assistant_chat", "error", { endpoint: "assistantRespond" });
     throw error;
   }
 }, aiFunctionOptions);
@@ -112,12 +112,10 @@ export const generateGoalPlan = onAuthenticatedJsonRequest(goalPlanRequestSchema
       createdAt: new Date().toISOString()
     };
 
-    await logAIUsage(userID, "goal_plan_generation", "success");
+    await logAIUsageBestEffort(userID, "goal_plan_generation", "success");
     return draft;
   } catch (error) {
-    await logAIUsage(userID, "goal_plan_generation", "error", { endpoint: "generateGoalPlan" }).catch(
-      () => undefined
-    );
+    await logAIUsageBestEffort(userID, "goal_plan_generation", "error", { endpoint: "generateGoalPlan" });
     throw error;
   }
 }, aiFunctionOptions);

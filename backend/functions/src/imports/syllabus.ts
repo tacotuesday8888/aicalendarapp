@@ -14,7 +14,7 @@ import { aiFunctionOptions } from "../shared/functionOptions.js";
 import { onAuthenticatedJsonRequest } from "../shared/http.js";
 import { logLegacyAIEndpointUse } from "../shared/legacyInstrumentation.js";
 import { runAIWorkflow } from "../ai/router.js";
-import { authorizeAndReserveAIUsage, enforceAIPremiumAccess, logAIUsage } from "../ai/usage.js";
+import { authorizeAndReserveAIUsage, enforceAIPremiumAccess, logAIUsageBestEffort } from "../ai/usage.js";
 
 type ImportCourseRecord = {
   id: string;
@@ -171,11 +171,11 @@ async function createImportJob(userID: string, rawText: string, sourceName: stri
       throw new HttpsError("internal", "Syllabus import review job could not be loaded.");
     }
 
-    await logAIUsage(userID, "syllabus_import", "success", { sourceName });
+    await logAIUsageBestEffort(userID, "syllabus_import", "success", { sourceName });
 
     return job;
   } catch (error) {
-    await logAIUsage(userID, "syllabus_import", "error", { sourceName }).catch(() => undefined);
+    await logAIUsageBestEffort(userID, "syllabus_import", "error", { sourceName });
     throw error;
   }
 }
