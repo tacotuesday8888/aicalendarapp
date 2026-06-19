@@ -5,6 +5,7 @@ import type { Request, Response } from "express";
 import { ZodError, type ZodType } from "zod";
 
 import { verifyAppCheckRequest } from "./appCheck.js";
+import { parseJsonRequestBody } from "./json.js";
 
 type AuthenticatedHandler<T> = (context: { authUID: string; data: T; request: Request }) => Promise<unknown>;
 
@@ -22,21 +23,13 @@ export function onAuthenticatedJsonRequest<T>(
     try {
       await verifyAppCheckRequest(request, request.path || request.originalUrl || "authenticated-json-request");
       const authUID = await verifyBearerToken(request);
-      const data = schema.parse(parseBody(request));
+      const data = schema.parse(parseJsonRequestBody(request.body));
       const result = await handler({ authUID, data, request });
       response.status(200).json(result);
     } catch (error) {
       respondWithError(response, error);
     }
   });
-}
-
-function parseBody(request: Request): unknown {
-  if (typeof request.body === "string") {
-    return request.body.length ? JSON.parse(request.body) : {};
-  }
-
-  return request.body ?? {};
 }
 
 async function verifyBearerToken(request: Request): Promise<string> {

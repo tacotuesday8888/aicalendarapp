@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 
 import {
   assertAIProviderRuntimeConfiguration,
@@ -64,12 +65,14 @@ import {
   safeUserImportStoragePath
 } from "../src/imports/syllabus.js";
 import { resolveAppCheckMode } from "../src/shared/appCheck.js";
+import { parseJsonRequestBody } from "../src/shared/json.js";
 
 process.env.AI_PROVIDER = "stub";
 
 async function runSmokeTest() {
   assertAIConfigDefaults();
   assertAppCheckModeContract();
+  assertRequestBodyParsingContract();
   assertPromptContracts();
   assertAssistantDraftActionContract();
   assertUsagePolicy();
@@ -234,6 +237,19 @@ function assertAppCheckModeContract() {
     () => resolveAppCheckMode({ APP_CHECK_MODE: "enforced" }),
     /Unsupported APP_CHECK_MODE/
   );
+}
+
+function assertRequestBodyParsingContract() {
+  assert.deepEqual(parseJsonRequestBody(""), {});
+  assert.deepEqual(parseJsonRequestBody("  \n  "), {});
+  assert.deepEqual(parseJsonRequestBody("{\"userID\":\"student-1\"}"), { userID: "student-1" });
+  assert.deepEqual(parseJsonRequestBody(Buffer.from("{\"ok\":true}", "utf8")), { ok: true });
+  assert.deepEqual(parseJsonRequestBody(new Uint8Array(Buffer.from("{\"count\":2}", "utf8"))), { count: 2 });
+
+  const objectBody = { workflow: "vibe_feedback" };
+  assert.equal(parseJsonRequestBody(objectBody), objectBody);
+  assert.deepEqual(parseJsonRequestBody(null), {});
+  assert.throws(() => parseJsonRequestBody("{"), SyntaxError);
 }
 
 function assertAIConfigDefaults() {
