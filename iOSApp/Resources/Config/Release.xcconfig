@@ -12,6 +12,7 @@ AI_API_BASE_URL =
 // Never use a RevenueCat secret API key (`sk_...`) or OAuth token (`atk_...`) in the app.
 REVENUECAT_API_KEY =
 REVENUECAT_ENTITLEMENT_ID = aiefficiencyapp Pro
+// Superwall release builds require the public SDK API key from Settings > Keys (`pk_...`).
 SUPERWALL_API_KEY =
 GOOGLE_CLIENT_ID =
 GOOGLE_REVERSED_CLIENT_ID =
