@@ -75,7 +75,7 @@ jobs:
 
       - name: Set up Java for Firebase emulators
         if: steps.changes.outputs.backend_changed == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
