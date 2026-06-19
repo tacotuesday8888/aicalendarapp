@@ -25,6 +25,18 @@ if [[ -z "${PACKAGE_RESOLUTION_TIMEOUT_SECONDS:-}" ]]; then
   fi
 fi
 
+if [[ -z "${IOS_CI_SIMULATOR_BOOT_TIMEOUT_SECONDS:-}" ]]; then
+  IOS_CI_SIMULATOR_BOOT_TIMEOUT_SECONDS=300
+fi
+
+if [[ -z "${IOS_CI_TEST_TIMEOUT_SECONDS:-}" ]]; then
+  if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
+    IOS_CI_TEST_TIMEOUT_SECONDS=2400
+  else
+    IOS_CI_TEST_TIMEOUT_SECONDS=2400
+  fi
+fi
+
 PACKAGE_RESOLUTION_ATTEMPTS="${PACKAGE_RESOLUTION_ATTEMPTS:-2}"
 
 if [[ -z "${RESET_IOS_CI_PACKAGES:-}" ]]; then
@@ -52,16 +64,35 @@ if [[ -z "${IOS_CI_GIT_HTTP_VERSION:-}" && "${GITHUB_ACTIONS:-false}" != "true" 
   IOS_CI_GIT_HTTP_VERSION="HTTP/1.1"
 fi
 
+if [[ -z "${IOS_CI_GIT_LOW_SPEED_LIMIT+x}" && "${GITHUB_ACTIONS:-false}" != "true" ]]; then
+  IOS_CI_GIT_LOW_SPEED_LIMIT=1024
+fi
+
+if [[ -z "${IOS_CI_GIT_LOW_SPEED_TIME+x}" && "${GITHUB_ACTIONS:-false}" != "true" ]]; then
+  IOS_CI_GIT_LOW_SPEED_TIME=120
+fi
+
+append_git_config() {
+  local key="$1"
+  local value="$2"
+  local config_index="${GIT_CONFIG_COUNT:-0}"
+
+  export GIT_CONFIG_COUNT=$((config_index + 1))
+  export "GIT_CONFIG_KEY_${config_index}=$key"
+  export "GIT_CONFIG_VALUE_${config_index}=$value"
+}
+
 IOS_CI_GIT_HTTP_VERSION_APPLIED=false
 if [[ -n "${IOS_CI_GIT_HTTP_VERSION:-}" ]]; then
-  if [[ -z "${GIT_CONFIG_COUNT:-}" ]]; then
-    export GIT_CONFIG_COUNT=1
-    export GIT_CONFIG_KEY_0=http.version
-    export GIT_CONFIG_VALUE_0="$IOS_CI_GIT_HTTP_VERSION"
-    IOS_CI_GIT_HTTP_VERSION_APPLIED=true
-  else
-    echo "GIT_CONFIG_COUNT is already set; leaving Git HTTP version unchanged." >&2
-  fi
+  append_git_config http.version "$IOS_CI_GIT_HTTP_VERSION"
+  IOS_CI_GIT_HTTP_VERSION_APPLIED=true
+fi
+
+IOS_CI_GIT_LOW_SPEED_APPLIED=false
+if [[ -n "${IOS_CI_GIT_LOW_SPEED_LIMIT:-}" && -n "${IOS_CI_GIT_LOW_SPEED_TIME:-}" ]]; then
+  append_git_config http.lowSpeedLimit "$IOS_CI_GIT_LOW_SPEED_LIMIT"
+  append_git_config http.lowSpeedTime "$IOS_CI_GIT_LOW_SPEED_TIME"
+  IOS_CI_GIT_LOW_SPEED_APPLIED=true
 fi
 
 created_simulator=""
@@ -76,7 +107,16 @@ trap cleanup EXIT
 
 run_with_timeout() {
   local timeout_seconds="$1"
-  shift
+  local timeout_label="$2"
+  local diagnostics_function="$3"
+  shift 3
+
+  if [[ "$timeout_seconds" -le 0 ]]; then
+    "$@"
+    return "$?"
+  fi
+
+  echo "$timeout_label timeout: ${timeout_seconds}s"
 
   "$@" &
   local command_pid="$!"
@@ -84,8 +124,10 @@ run_with_timeout() {
   (
     sleep "$timeout_seconds"
     if kill -0 "$command_pid" >/dev/null 2>&1; then
-      echo "Command timed out after ${timeout_seconds} seconds: $*" >&2
-      print_package_resolution_diagnostics
+      echo "$timeout_label timed out after ${timeout_seconds} seconds: $*" >&2
+      if [[ -n "$diagnostics_function" ]]; then
+        "$diagnostics_function"
+      fi
       terminate_process_tree "$command_pid" TERM
       sleep 5
       terminate_process_tree "$command_pid" KILL
@@ -121,6 +163,24 @@ print_package_resolution_diagnostics() {
 
   echo "Package directory sizes:" >&2
   du -sh "$SOURCE_PACKAGES_PATH" "$PACKAGE_CACHE_PATH" 2>/dev/null >&2 || true
+}
+
+print_ios_test_diagnostics() {
+  echo "Active Xcode test and simulator processes:" >&2
+  ps -axo pid=,ppid=,stat=,etime=,command= | awk '
+    $0 ~ /xcodebuild test/ ||
+    $0 ~ /xctest/ ||
+    $0 ~ /Simulator/ ||
+    $0 ~ /CoreSimulator/ { print }
+  ' >&2 || true
+
+  if [[ -n "$created_simulator" ]]; then
+    echo "CI simulator state:" >&2
+    xcrun simctl list devices 2>/dev/null | awk -v udid="$created_simulator" 'index($0, udid) { print }' >&2 || true
+  fi
+
+  echo "DerivedData, SourcePackages, and result bundle sizes:" >&2
+  du -sh "$DERIVED_DATA_PATH" "$SOURCE_PACKAGES_PATH" "$RESULT_BUNDLE_PATH" 2>/dev/null >&2 || true
 }
 
 terminate_package_resolution_processes() {
@@ -172,7 +232,7 @@ run_package_resolution_with_retries() {
 
   local attempt
   for ((attempt = 1; attempt <= attempts; attempt++)); do
-    if run_with_timeout "$PACKAGE_RESOLUTION_TIMEOUT_SECONDS" "$@"; then
+    if run_with_timeout "$PACKAGE_RESOLUTION_TIMEOUT_SECONDS" "Package resolution" print_package_resolution_diagnostics "$@"; then
       return 0
     fi
 
@@ -217,8 +277,12 @@ echo "Xcode version:"
 xcodebuild -version
 echo "Package cache path: $PACKAGE_CACHE_PATH"
 echo "Package resolution timeout: ${PACKAGE_RESOLUTION_TIMEOUT_SECONDS}s; attempts: ${PACKAGE_RESOLUTION_ATTEMPTS}; reset packages: $RESET_IOS_CI_PACKAGES; disable repository cache: $DISABLE_IOS_CI_PACKAGE_REPOSITORY_CACHE"
+echo "Simulator boot timeout: ${IOS_CI_SIMULATOR_BOOT_TIMEOUT_SECONDS}s; test timeout: ${IOS_CI_TEST_TIMEOUT_SECONDS}s"
 if [[ "$IOS_CI_GIT_HTTP_VERSION_APPLIED" == "true" ]]; then
   echo "Git HTTP version override: $IOS_CI_GIT_HTTP_VERSION"
+fi
+if [[ "$IOS_CI_GIT_LOW_SPEED_APPLIED" == "true" ]]; then
+  echo "Git low-speed guard: ${IOS_CI_GIT_LOW_SPEED_LIMIT} bytes/s for ${IOS_CI_GIT_LOW_SPEED_TIME}s"
 fi
 
 if [[ "$RESET_IOS_CI_PACKAGES" == "true" ]]; then
@@ -253,7 +317,7 @@ if [[ -z "$destination" ]]; then
 
   created_simulator="$(xcrun simctl create "AI Calendar CI ${GITHUB_RUN_ID:-local}-$$" "$device_type" "$runtime")"
   xcrun simctl boot "$created_simulator"
-  xcrun simctl bootstatus "$created_simulator" -b
+  run_with_timeout "$IOS_CI_SIMULATOR_BOOT_TIMEOUT_SECONDS" "Simulator boot" print_ios_test_diagnostics xcrun simctl bootstatus "$created_simulator" -b
   destination="platform=iOS Simulator,id=$created_simulator"
 fi
 
@@ -280,4 +344,4 @@ run_unit_tests() {
     CODE_SIGNING_REQUIRED=NO
 }
 
-run_unit_tests
+run_with_timeout "$IOS_CI_TEST_TIMEOUT_SECONDS" "iOS unit tests" print_ios_test_diagnostics run_unit_tests
