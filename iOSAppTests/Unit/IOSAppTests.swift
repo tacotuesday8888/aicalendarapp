@@ -208,6 +208,51 @@ private final class TestStudySessionService: StudySessionServicing {
     }
 }
 
+private final class TestReflectionService: ReflectionServicing {
+    private(set) var checkIns = [DailyCheckIn]()
+    private(set) var vibeChecks = [VibeCheck]()
+    var saveCheckInError: Error?
+    var saveVibeCheckError: Error?
+
+    func fetchCheckIns(for userID: String) -> AsyncThrowingStream<[DailyCheckIn], Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(checkIns)
+            continuation.finish()
+        }
+    }
+
+    func fetchVibeChecks(for userID: String) -> AsyncThrowingStream<[VibeCheck], Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(vibeChecks)
+            continuation.finish()
+        }
+    }
+
+    func saveCheckIn(_ checkIn: DailyCheckIn, for userID: String) async throws {
+        if let saveCheckInError {
+            throw saveCheckInError
+        }
+        checkIns.removeAll { $0.id == checkIn.id }
+        checkIns.append(checkIn)
+    }
+
+    func saveVibeCheck(_ vibeCheck: VibeCheck, for userID: String) async throws {
+        if let saveVibeCheckError {
+            throw saveVibeCheckError
+        }
+        vibeChecks.removeAll { $0.id == vibeCheck.id }
+        vibeChecks.append(vibeCheck)
+    }
+
+    func deleteCheckIn(id: String, for userID: String) async throws {
+        checkIns.removeAll { $0.id == id }
+    }
+
+    func deleteVibeCheck(id: String, for userID: String) async throws {
+        vibeChecks.removeAll { $0.id == id }
+    }
+}
+
 private final class TestGoalService: GoalServicing {
     private(set) var goals = [Goal]()
     private(set) var deletedGoalIDs = [String]()
@@ -592,11 +637,21 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
 
 private final class TestAIBackendService: AIBackendServicing {
     var isConfigured = true
-    var assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>
+    var assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>?
+    var vibeFeedbackResponse: AIWorkflowRunResponse<AIVibeFeedbackResult>?
+    var runError: Error?
     private(set) var workflows = [AIWorkflow]()
 
     init(assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>) {
         self.assistantResponse = assistantResponse
+    }
+
+    init(
+        vibeFeedbackResponse: AIWorkflowRunResponse<AIVibeFeedbackResult>? = nil,
+        runError: Error? = nil
+    ) {
+        self.vibeFeedbackResponse = vibeFeedbackResponse
+        self.runError = runError
     }
 
     func run<Payload, Result>(
@@ -605,11 +660,24 @@ private final class TestAIBackendService: AIBackendServicing {
         decode: Result.Type
     ) async throws -> AIWorkflowRunResponse<Result> where Payload: Encodable, Result: Decodable {
         workflows.append(workflow)
-        guard workflow == .assistantChat,
-              let response = assistantResponse as? AIWorkflowRunResponse<Result> else {
+        if let runError {
+            throw runError
+        }
+
+        switch workflow {
+        case .assistantChat:
+            guard let response = assistantResponse as? AIWorkflowRunResponse<Result> else {
+                throw AppError.network(description: "Unsupported test AI workflow.")
+            }
+            return response
+        case .vibeFeedback:
+            guard let response = vibeFeedbackResponse as? AIWorkflowRunResponse<Result> else {
+                throw AppError.network(description: "Unsupported test AI workflow.")
+            }
+            return response
+        default:
             throw AppError.network(description: "Unsupported test AI workflow.")
         }
-        return response
     }
 }
 
@@ -1676,6 +1744,64 @@ struct IOSAppTests {
         #expect(persisted.streak == 1)
         #expect(persisted.targetCountPerWeek == 4)
         #expect(persisted.isCompletedToday)
+    }
+
+    @Test func todayVibeCheckSavesReflectionWhenConfiguredAIBackendFails() async {
+        let profile = testProfile(id: uniqueUserID("today-vibe-ai-fallback"))
+        let reflectionService = TestReflectionService()
+        let aiBackend = TestAIBackendService(runError: AppError.network(description: "AI outage"))
+        let analyticsService = TestAnalyticsService()
+        let viewModel = TodayViewModel(
+            user: profile,
+            plannerService: TestPlannerService(),
+            reflectionService: reflectionService,
+            aiBackendService: aiBackend,
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+
+        viewModel.vibePrompt = "  Exhausted before finals.  "
+        viewModel.selectedVibeMood = .stressed
+
+        await viewModel.submitVibeCheck()
+
+        #expect(aiBackend.workflows == [.vibeFeedback])
+        #expect(reflectionService.vibeChecks.count == 1)
+        #expect(reflectionService.vibeChecks.first?.mood == .stressed)
+        #expect(reflectionService.vibeChecks.first?.prompt == "Exhausted before finals.")
+        #expect(reflectionService.vibeChecks.first?.feedback.contains("temporarily unavailable") == true)
+        #expect(viewModel.vibePrompt.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.errors == ["today_vibe_feedback"])
+        #expect(analyticsService.events.contains("vibe_check_submitted"))
+    }
+
+    @Test func reflectionsVibeCheckSavesReflectionWhenConfiguredAIBackendFails() async {
+        let profile = testProfile(id: uniqueUserID("reflections-vibe-ai-fallback"))
+        let reflectionService = TestReflectionService()
+        let aiBackend = TestAIBackendService(runError: AppError.network(description: "AI outage"))
+        let analyticsService = TestAnalyticsService()
+        let viewModel = ReflectionsViewModel(
+            user: profile,
+            reflectionService: reflectionService,
+            aiBackendService: aiBackend,
+            analyticsService: analyticsService
+        )
+
+        viewModel.vibePrompt = "  Group project is slipping.  "
+        viewModel.selectedMood = .overwhelmed
+
+        await viewModel.saveVibeCheck()
+
+        #expect(aiBackend.workflows == [.vibeFeedback])
+        #expect(reflectionService.vibeChecks.count == 1)
+        #expect(reflectionService.vibeChecks.first?.mood == .overwhelmed)
+        #expect(reflectionService.vibeChecks.first?.prompt == "Group project is slipping.")
+        #expect(reflectionService.vibeChecks.first?.feedback.contains("temporarily unavailable") == true)
+        #expect(viewModel.vibePrompt.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.errors == ["reflections_vibe_feedback"])
+        #expect(analyticsService.events.contains("vibe_check_saved"))
     }
 
     @Test func sessionsViewModelRejectsOversizedAttachmentBeforeUpload() async throws {
