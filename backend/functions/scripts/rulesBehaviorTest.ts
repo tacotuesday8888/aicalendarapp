@@ -115,15 +115,14 @@ const tests: RulesTestCase[] = [
     }
   },
   {
-    name: "Firestore documents unknown direct subcollections as owner-readable but not client-writable",
+    name: "Firestore blocks unknown direct user subcollections",
     run: async (testEnv) => {
       await testEnv.withSecurityRulesDisabled(async (context) => {
         await context.firestore().doc("users/alice/customReadOnly/doc-1").set({ source: "server" });
       });
 
       const aliceDB = testEnv.authenticatedContext("alice").firestore();
-      const snapshot = await assertSucceeds(aliceDB.doc("users/alice/customReadOnly/doc-1").get());
-      assert.equal(snapshot.get("source"), "server");
+      await assertFails(aliceDB.doc("users/alice/customReadOnly/doc-1").get());
       await assertFails(aliceDB.doc("users/alice/customReadOnly/doc-1").set({ source: "client" }));
     }
   },

@@ -9,24 +9,46 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userID;
     }
 
+    function isClientWritableCollection(collection) {
+      return collection in [
+        "onboarding",
+        "goals",
+        "plannerBlocks",
+        "courses",
+        "assignments",
+        "habits",
+        "studySessions",
+        "checkIns",
+        "vibeChecks",
+        "reminderRules"
+      ];
+    }
+
+    function isServerReadableCollection(collection) {
+      return collection in [
+        "assistantThreads",
+        "goalPlans",
+        "imports",
+        "subscriptions",
+        "aiUsageLogs",
+        "aiUsage",
+        "aiUsageDaily",
+        "aiDrafts",
+        "assistantDraftArtifacts"
+      ];
+    }
+
+    function isReadableUserCollection(collection) {
+      return isClientWritableCollection(collection) || isServerReadableCollection(collection);
+    }
+
     match /users/{userID} {
       allow read, write: if isOwner(userID);
 
       match /{collection}/{documentID} {
-        allow read: if isOwner(userID);
+        allow read: if isOwner(userID) && isReadableUserCollection(collection);
 
-        allow create, update, delete: if isOwner(userID) && collection in [
-          "onboarding",
-          "goals",
-          "plannerBlocks",
-          "courses",
-          "assignments",
-          "habits",
-          "studySessions",
-          "checkIns",
-          "vibeChecks",
-          "reminderRules"
-        ];
+        allow create, update, delete: if isOwner(userID) && isClientWritableCollection(collection);
       }
 
       match /assistantThreads/{documentID} {
