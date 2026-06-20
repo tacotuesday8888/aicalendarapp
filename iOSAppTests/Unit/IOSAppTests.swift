@@ -186,6 +186,73 @@ private final class TestPlannerService: PlannerServicing {
     }
 }
 
+private final class TestStudySessionService: StudySessionServicing {
+    private(set) var sessions = [StudySession]()
+    private(set) var deletedSessionIDs = [String]()
+
+    func observeSessions(for userID: String) -> AsyncThrowingStream<[StudySession], Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(sessions)
+            continuation.finish()
+        }
+    }
+
+    func saveSession(_ session: StudySession, for userID: String) async throws {
+        sessions.removeAll { $0.id == session.id }
+        sessions.append(session)
+    }
+
+    func deleteSession(id: String, for userID: String) async throws {
+        deletedSessionIDs.append(id)
+        sessions.removeAll { $0.id == id }
+    }
+}
+
+private final class TestReflectionService: ReflectionServicing {
+    private(set) var checkIns = [DailyCheckIn]()
+    private(set) var vibeChecks = [VibeCheck]()
+    var saveCheckInError: Error?
+    var saveVibeCheckError: Error?
+
+    func fetchCheckIns(for userID: String) -> AsyncThrowingStream<[DailyCheckIn], Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(checkIns)
+            continuation.finish()
+        }
+    }
+
+    func fetchVibeChecks(for userID: String) -> AsyncThrowingStream<[VibeCheck], Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(vibeChecks)
+            continuation.finish()
+        }
+    }
+
+    func saveCheckIn(_ checkIn: DailyCheckIn, for userID: String) async throws {
+        if let saveCheckInError {
+            throw saveCheckInError
+        }
+        checkIns.removeAll { $0.id == checkIn.id }
+        checkIns.append(checkIn)
+    }
+
+    func saveVibeCheck(_ vibeCheck: VibeCheck, for userID: String) async throws {
+        if let saveVibeCheckError {
+            throw saveVibeCheckError
+        }
+        vibeChecks.removeAll { $0.id == vibeCheck.id }
+        vibeChecks.append(vibeCheck)
+    }
+
+    func deleteCheckIn(id: String, for userID: String) async throws {
+        checkIns.removeAll { $0.id == id }
+    }
+
+    func deleteVibeCheck(id: String, for userID: String) async throws {
+        vibeChecks.removeAll { $0.id == id }
+    }
+}
+
 private final class TestGoalService: GoalServicing {
     private(set) var goals = [Goal]()
     private(set) var deletedGoalIDs = [String]()
@@ -349,6 +416,7 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
     var disconnectError: Error?
     var importError: Error?
     var importedBlocks = [PlannerBlock]()
+    private(set) var availableCalendarRequestCount = 0
     private(set) var importedCalendarIDs = [[String]]()
     private(set) var disconnectedUserIDs = [String]()
 
@@ -357,6 +425,7 @@ private final class TestCalendarSyncService: CalendarSyncServicing {
     }
 
     func availableCalendars() async throws -> [SyncLink] {
+        availableCalendarRequestCount += 1
         if let availableCalendarsError {
             throw availableCalendarsError
         }
@@ -568,11 +637,21 @@ private final class TestBackendFunctionService: BackendFunctionServicing {
 
 private final class TestAIBackendService: AIBackendServicing {
     var isConfigured = true
-    var assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>
+    var assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>?
+    var vibeFeedbackResponse: AIWorkflowRunResponse<AIVibeFeedbackResult>?
+    var runError: Error?
     private(set) var workflows = [AIWorkflow]()
 
     init(assistantResponse: AIWorkflowRunResponse<AIAssistantChatResult>) {
         self.assistantResponse = assistantResponse
+    }
+
+    init(
+        vibeFeedbackResponse: AIWorkflowRunResponse<AIVibeFeedbackResult>? = nil,
+        runError: Error? = nil
+    ) {
+        self.vibeFeedbackResponse = vibeFeedbackResponse
+        self.runError = runError
     }
 
     func run<Payload, Result>(
@@ -581,11 +660,24 @@ private final class TestAIBackendService: AIBackendServicing {
         decode: Result.Type
     ) async throws -> AIWorkflowRunResponse<Result> where Payload: Encodable, Result: Decodable {
         workflows.append(workflow)
-        guard workflow == .assistantChat,
-              let response = assistantResponse as? AIWorkflowRunResponse<Result> else {
+        if let runError {
+            throw runError
+        }
+
+        switch workflow {
+        case .assistantChat:
+            guard let response = assistantResponse as? AIWorkflowRunResponse<Result> else {
+                throw AppError.network(description: "Unsupported test AI workflow.")
+            }
+            return response
+        case .vibeFeedback:
+            guard let response = vibeFeedbackResponse as? AIWorkflowRunResponse<Result> else {
+                throw AppError.network(description: "Unsupported test AI workflow.")
+            }
+            return response
+        default:
             throw AppError.network(description: "Unsupported test AI workflow.")
         }
-        return response
     }
 }
 
@@ -644,6 +736,20 @@ private final class TestSyllabusImportService: SyllabusImportServicing {
 
     func delete(_ job: ImportJob, for userID: String) async throws {
         deletedJobIDs.append(job.id)
+    }
+}
+
+private final class TestStorageService: StorageServicing {
+    private(set) var uploads = [(path: String, contentType: String, byteCount: Int)]()
+    private(set) var deletedPaths = [String]()
+
+    func upload(data: Data, path: String, contentType: String) async throws -> String {
+        uploads.append((path: path, contentType: contentType, byteCount: data.count))
+        return path
+    }
+
+    func delete(path: String) async throws {
+        deletedPaths.append(path)
     }
 }
 
@@ -1139,6 +1245,19 @@ struct IOSAppTests {
         }
     }
 
+    @Test func plannerSnapshotUsesRequestedReferenceDate() async throws {
+        let userID = uniqueUserID("planner-reference-date")
+        let database = TestDatabaseService()
+        let service = PlannerService()
+        service.databaseService = database
+        let referenceDate = Date(timeIntervalSince1970: 1_777_248_600)
+
+        var iterator = service.observeSnapshot(for: userID, on: referenceDate).makeAsyncIterator()
+        let snapshot = try await iterator.next()
+
+        #expect(snapshot?.date == referenceDate)
+    }
+
     @Test func calendarViewModelSavesUpdatesAndDeletesPlannerBlocks() async throws {
         let profile = testProfile(id: uniqueUserID("calendar-vm"))
         let plannerService = TestPlannerService()
@@ -1246,8 +1365,8 @@ struct IOSAppTests {
         )
 
         let dueDate = Date(timeIntervalSince1970: 1_776_500_000)
-        viewModel.title = "Finish biology chapter"
-        viewModel.detail = "Read, annotate, and summarize."
+        viewModel.title = "  Finish biology chapter  "
+        viewModel.detail = "  Read, annotate, and summarize.  "
         viewModel.selectedPriority = .high
         viewModel.selectedCategory = .academic
         viewModel.dueDate = dueDate
@@ -1256,6 +1375,7 @@ struct IOSAppTests {
 
         let createdGoal = try #require(goalService.goals.first)
         #expect(createdGoal.title == "Finish biology chapter")
+        #expect(createdGoal.detail == "Read, annotate, and summarize.")
         #expect(createdGoal.status == .active)
         #expect(viewModel.title.isEmpty)
         #expect(analyticsService.events.contains("goal_created"))
@@ -1266,12 +1386,13 @@ struct IOSAppTests {
         #expect(completedGoal.status == .completed)
 
         var editedGoal = completedGoal
-        editedGoal.title = "Finish biology chapter and quiz"
-        editedGoal.detail = "Add end-of-chapter quiz questions."
+        editedGoal.title = "  Finish biology chapter and quiz  "
+        editedGoal.detail = "  Add end-of-chapter quiz questions.  "
         viewModel.beginEditing(completedGoal)
         try await viewModel.saveEdits(editedGoal)
 
         #expect(goalService.goals.first?.title == "Finish biology chapter and quiz")
+        #expect(goalService.goals.first?.detail == "Add end-of-chapter quiz questions.")
         #expect(viewModel.editingGoal == nil)
         #expect(analyticsService.events.contains("goal_updated"))
 
@@ -1282,6 +1403,42 @@ struct IOSAppTests {
         #expect(goalService.goals.isEmpty)
         #expect(viewModel.pendingDeleteGoal == nil)
         #expect(analyticsService.events.contains("goal_deleted"))
+    }
+
+    @Test func goalsViewModelRejectsBlankGoalTitlesBeforeSaving() async {
+        let profile = testProfile(id: uniqueUserID("goals-vm-blank-title"))
+        let goalService = TestGoalService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: TestDatabaseService(),
+            analyticsService: TestAnalyticsService()
+        )
+
+        viewModel.title = "   "
+        await viewModel.addGoal()
+
+        #expect(goalService.goals.isEmpty)
+        #expect(viewModel.errorMessage == "Goal title is required.")
+
+        var existingGoal = Goal(
+            title: "Existing",
+            detail: "",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: nil,
+            sortIndex: 0,
+            subGoals: [],
+            checkpoints: []
+        )
+        existingGoal.title = "  "
+
+        await #expect(throws: AppError.unknown("Goal title is required.")) {
+            try await viewModel.saveEdits(existingGoal)
+        }
+        #expect(goalService.goals.isEmpty)
+        #expect(viewModel.errorMessage == "Goal title is required.")
     }
 
     @Test func goalsViewModelShowsGeneratedPlanImmediatelyWithoutClientWrite() async throws {
@@ -1610,6 +1767,177 @@ struct IOSAppTests {
         #expect(persisted.streak == 1)
         #expect(persisted.targetCountPerWeek == 4)
         #expect(persisted.isCompletedToday)
+    }
+
+    @Test func todayVibeCheckSavesReflectionWhenConfiguredAIBackendFails() async {
+        let profile = testProfile(id: uniqueUserID("today-vibe-ai-fallback"))
+        let reflectionService = TestReflectionService()
+        let aiBackend = TestAIBackendService(runError: AppError.network(description: "AI outage"))
+        let analyticsService = TestAnalyticsService()
+        let viewModel = TodayViewModel(
+            user: profile,
+            plannerService: TestPlannerService(),
+            reflectionService: reflectionService,
+            aiBackendService: aiBackend,
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+
+        viewModel.vibePrompt = "  Exhausted before finals.  "
+        viewModel.selectedVibeMood = .stressed
+
+        await viewModel.submitVibeCheck()
+
+        #expect(aiBackend.workflows == [.vibeFeedback])
+        #expect(reflectionService.vibeChecks.count == 1)
+        #expect(reflectionService.vibeChecks.first?.mood == .stressed)
+        #expect(reflectionService.vibeChecks.first?.prompt == "Exhausted before finals.")
+        #expect(reflectionService.vibeChecks.first?.feedback.contains("temporarily unavailable") == true)
+        #expect(viewModel.vibePrompt.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.errors == ["today_vibe_feedback"])
+        #expect(analyticsService.events.contains("vibe_check_submitted"))
+    }
+
+    @Test func reflectionsVibeCheckSavesReflectionWhenConfiguredAIBackendFails() async {
+        let profile = testProfile(id: uniqueUserID("reflections-vibe-ai-fallback"))
+        let reflectionService = TestReflectionService()
+        let aiBackend = TestAIBackendService(runError: AppError.network(description: "AI outage"))
+        let analyticsService = TestAnalyticsService()
+        let viewModel = ReflectionsViewModel(
+            user: profile,
+            reflectionService: reflectionService,
+            aiBackendService: aiBackend,
+            analyticsService: analyticsService
+        )
+
+        viewModel.vibePrompt = "  Group project is slipping.  "
+        viewModel.selectedMood = .overwhelmed
+
+        await viewModel.saveVibeCheck()
+
+        #expect(aiBackend.workflows == [.vibeFeedback])
+        #expect(reflectionService.vibeChecks.count == 1)
+        #expect(reflectionService.vibeChecks.first?.mood == .overwhelmed)
+        #expect(reflectionService.vibeChecks.first?.prompt == "Group project is slipping.")
+        #expect(reflectionService.vibeChecks.first?.feedback.contains("temporarily unavailable") == true)
+        #expect(viewModel.vibePrompt.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.errors == ["reflections_vibe_feedback"])
+        #expect(analyticsService.events.contains("vibe_check_saved"))
+    }
+
+    @Test func sessionsViewModelRejectsOversizedAttachmentBeforeUpload() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oversized-session-attachment-\(UUID().uuidString).txt")
+        try Data(repeating: 0, count: 10 * 1024 * 1024).write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let storageService = TestStorageService()
+        let viewModel = SessionsViewModel(
+            user: testProfile(id: uniqueUserID("session-attachment-size")),
+            studySessionService: TestStudySessionService(),
+            storageService: storageService,
+            analyticsService: TestAnalyticsService()
+        )
+
+        await viewModel.addAttachment(from: fileURL)
+
+        #expect(storageService.uploads.isEmpty)
+        #expect(viewModel.pendingAttachments.isEmpty)
+        #expect(viewModel.errorMessage == "Study session attachments must be smaller than 10 MB.")
+    }
+
+    @Test func sessionsViewModelRejectsUnsupportedAttachmentTypeBeforeUpload() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("unsupported-session-attachment-\(UUID().uuidString).mp4")
+        try Data("not a real video".utf8).write(to: fileURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let storageService = TestStorageService()
+        let viewModel = SessionsViewModel(
+            user: testProfile(id: uniqueUserID("session-attachment-type")),
+            studySessionService: TestStudySessionService(),
+            storageService: storageService,
+            analyticsService: TestAnalyticsService()
+        )
+
+        await viewModel.addAttachment(from: fileURL)
+
+        #expect(storageService.uploads.isEmpty)
+        #expect(viewModel.pendingAttachments.isEmpty)
+        #expect(viewModel.errorMessage == "This file type is not supported for study session attachments. Use a document, text file, or image.")
+    }
+
+    @Test func sessionsViewModelDeletesStorageObjectWhenPendingAttachmentIsRemoved() async throws {
+        let profile = testProfile(id: uniqueUserID("session-pending-attachment"))
+        let storageService = TestStorageService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SessionsViewModel(
+            user: profile,
+            studySessionService: TestStudySessionService(),
+            storageService: storageService,
+            analyticsService: analyticsService
+        )
+        let attachment = StudyAttachment(
+            fileName: "notes.pdf",
+            remotePath: "users/\(profile.id)/study-sessions/notes.pdf",
+            contentType: "application/pdf"
+        )
+        viewModel.pendingAttachments = [attachment]
+
+        await viewModel.removePendingAttachment(attachment)
+
+        #expect(storageService.deletedPaths == [attachment.remotePath])
+        #expect(viewModel.pendingAttachments.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+        #expect(!viewModel.isUploadingAttachment)
+        #expect(analyticsService.events.contains("session_attachment_removed_pending"))
+    }
+
+    @Test func sessionsViewModelDeletesStorageObjectsWhenSessionIsDeleted() async throws {
+        let profile = testProfile(id: uniqueUserID("session-delete-attachments"))
+        let studySessionService = TestStudySessionService()
+        let storageService = TestStorageService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SessionsViewModel(
+            user: profile,
+            studySessionService: studySessionService,
+            storageService: storageService,
+            analyticsService: analyticsService
+        )
+        let attachments = [
+            StudyAttachment(
+                fileName: "outline.pdf",
+                remotePath: "users/\(profile.id)/study-sessions/outline.pdf",
+                contentType: "application/pdf"
+            ),
+            StudyAttachment(
+                fileName: "whiteboard.jpg",
+                remotePath: "users/\(profile.id)/study-sessions/whiteboard.jpg",
+                contentType: "image/jpeg"
+            )
+        ]
+        let session = StudySession(
+            title: "Biology review",
+            notes: "Chapter 4",
+            plannedMinutes: 45,
+            elapsedMinutes: 45,
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_776_200_000),
+            endedAt: Date(timeIntervalSince1970: 1_776_202_700),
+            attachments: attachments
+        )
+        try await studySessionService.saveSession(session, for: profile.id)
+
+        viewModel.requestDelete(session)
+        await viewModel.confirmDelete()
+
+        #expect(studySessionService.deletedSessionIDs == [session.id])
+        #expect(storageService.deletedPaths == attachments.map(\.remotePath))
+        #expect(viewModel.pendingDeleteSession == nil)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.events.contains("session_deleted"))
     }
 
     @Test func localSubscriptionStorePublishesRestoreAndPurchaseStateChanges() async {
@@ -2421,7 +2749,30 @@ struct IOSAppTests {
         #expect(analyticsService.events.contains("notification_permission_denied"))
     }
 
-    @Test func settingsViewModelReportsCalendarPermissionFailureDuringLoad() async {
+    @Test func settingsViewModelLoadDoesNotRequestCalendarAccessAutomatically() async {
+        let profile = testProfile(id: uniqueUserID("settings-calendar-no-auto-prompt"))
+        let calendarSyncService = TestCalendarSyncService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SettingsViewModel(
+            user: profile,
+            authService: TestAuthService(currentUserID: profile.id),
+            userService: TestUserService(profile: profile),
+            calendarSyncService: calendarSyncService,
+            notificationService: TestNotificationService(),
+            subscriptionService: TestSubscriptionService(),
+            backendFunctionService: TestBackendFunctionService(),
+            databaseService: TestDatabaseService(),
+            analyticsService: analyticsService
+        )
+
+        await viewModel.load()
+
+        #expect(calendarSyncService.availableCalendarRequestCount == 0)
+        #expect(viewModel.availableCalendars.isEmpty)
+        #expect(analyticsService.screens == ["settings"])
+    }
+
+    @Test func settingsViewModelReportsCalendarPermissionFailureDuringExplicitLoad() async {
         let profile = testProfile(id: uniqueUserID("settings-calendar-load-denied"))
         let calendarSyncService = TestCalendarSyncService()
         calendarSyncService.availableCalendarsError = AppError.permissionDenied("calendar access")
@@ -2437,8 +2788,9 @@ struct IOSAppTests {
             analyticsService: TestAnalyticsService()
         )
 
-        await viewModel.load()
+        await viewModel.loadCalendars()
 
+        #expect(calendarSyncService.availableCalendarRequestCount == 1)
         #expect(viewModel.availableCalendars.isEmpty)
         #expect(viewModel.statusMessage == "Permission for calendar access was denied.")
     }
@@ -2799,6 +3151,73 @@ struct IOSAppTests {
         #expect(state.isComplete)
     }
 
+    @Test func onboardingLoadDoesNotRequestCalendarAccessAutomatically() async {
+        let profile = testProfile(id: uniqueUserID("onboarding-calendar-no-auto-prompt"))
+        let calendarSyncService = TestCalendarSyncService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: calendarSyncService,
+            syllabusImportService: TestSyllabusImportService(),
+            analyticsService: analyticsService,
+            notificationService: TestNotificationService()
+        )
+
+        await viewModel.load()
+
+        #expect(calendarSyncService.availableCalendarRequestCount == 0)
+        #expect(viewModel.availableCalendars.isEmpty)
+        #expect(analyticsService.screens == ["onboarding"])
+    }
+
+    @Test func onboardingCalendarAccessRequiresExplicitRequest() async {
+        let profile = testProfile(id: uniqueUserID("onboarding-calendar-explicit"))
+        let calendarSyncService = TestCalendarSyncService()
+        calendarSyncService.calendars = [
+            SyncLink(
+                provider: .appleCalendar,
+                externalID: "school",
+                displayName: "School",
+                direction: .importOnly,
+                lastSyncedAt: .now
+            )
+        ]
+        let analyticsService = TestAnalyticsService()
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: calendarSyncService,
+            syllabusImportService: TestSyllabusImportService(),
+            analyticsService: analyticsService,
+            notificationService: TestNotificationService()
+        )
+
+        await viewModel.loadCalendars()
+
+        #expect(calendarSyncService.availableCalendarRequestCount == 1)
+        #expect(viewModel.availableCalendars.map(\.externalID) == ["school"])
+        #expect(analyticsService.events.contains("onboarding_calendar_access_requested"))
+        #expect(!viewModel.isLoading)
+    }
+
+    @Test func onboardingCalendarImportStoresSelectedIDsDeterministically() async {
+        let profile = testProfile(id: uniqueUserID("onboarding-calendar-sorted"))
+        let calendarSyncService = TestCalendarSyncService()
+        let viewModel = OnboardingViewModel(
+            user: profile,
+            calendarSyncService: calendarSyncService,
+            syllabusImportService: TestSyllabusImportService(),
+            analyticsService: TestAnalyticsService(),
+            notificationService: TestNotificationService()
+        )
+        viewModel.selectedCalendarIDs = ["school", "personal"]
+
+        await viewModel.importCalendars()
+
+        #expect(calendarSyncService.importedCalendarIDs == [["personal", "school"]])
+        #expect(viewModel.profile.selectedCalendarIDs == ["personal", "school"])
+        #expect(viewModel.state.didImportCalendar)
+    }
+
     @Test func onboardingCompletionRejectsWhitespaceOnlyProfile() async {
         var profile = testProfile(id: uniqueUserID("onboarding-whitespace"))
         profile.displayName = "   "
@@ -2950,6 +3369,45 @@ struct IOSAppTests {
         #expect(viewModel.errorMessage == nil)
         #expect(analyticsService.events.contains("import_commit_confirmed"))
         #expect(viewModel.committingJobID == nil)
+    }
+
+    @Test func importsViewModelRejectsEmptyImportCommitBeforeBackendCall() async {
+        let profile = testProfile(id: uniqueUserID("imports-empty-commit"))
+        let importService = TestSyllabusImportService()
+        let viewModel = ImportsViewModel(
+            user: profile,
+            syllabusImportService: importService,
+            analyticsService: TestAnalyticsService()
+        )
+        let job = ImportJob(
+            sourceName: "empty-syllabus.txt",
+            status: .failed,
+            extractedCourses: [],
+            extractedAssignments: [],
+            warnings: ["No courses found."]
+        )
+
+        await #expect(throws: AppError.unknown("Import requires at least one course before it can be committed.")) {
+            try await viewModel.commit(job)
+        }
+
+        #expect(!viewModel.canCommit(job))
+        #expect(importService.committedJobs.isEmpty)
+        #expect(viewModel.errorMessage == "Import requires at least one course before it can be committed.")
+        #expect(viewModel.committingJobID == nil)
+    }
+
+    @Test func syllabusImportServiceRejectsFilesAtStorageSizeLimitBeforeUpload() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oversized-syllabus-\(UUID().uuidString).txt")
+        try Data(repeating: 65, count: 10 * 1024 * 1024).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let service = SyllabusImportService()
+
+        await #expect(throws: AppError.network(description: "Syllabus files must be smaller than 10 MB. Choose a smaller text or searchable PDF file.")) {
+            _ = try await service.importFile(at: fileURL, for: uniqueUserID("oversized-import"))
+        }
     }
 
     @Test func assistantLocalFallbackDropsUnsupportedDraftActions() async throws {

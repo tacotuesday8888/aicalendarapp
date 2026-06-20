@@ -21,6 +21,8 @@ final class SessionsViewModel: ObservableObject {
     private let storageService: StorageServicing
     private let analyticsService: AnalyticsServicing
     private var observationTask: Task<Void, Never>?
+    private static let maxAttachmentFileBytes = 10 * 1024 * 1024
+    private static let supportedAttachmentContentTypePrefixes = ["application/", "text/", "image/"]
 
     init(user: UserProfile, studySessionService: StudySessionServicing, storageService: StorageServicing, analyticsService: AnalyticsServicing) {
         self.user = user
@@ -158,6 +160,9 @@ final class SessionsViewModel: ObservableObject {
 
         do {
             try await studySessionService.deleteSession(id: session.id, for: user.id)
+            for attachment in session.attachments {
+                try? await storageService.delete(path: attachment.remotePath)
+            }
             errorMessage = nil
             analyticsService.track(event: "session_deleted")
         } catch {
@@ -180,9 +185,9 @@ final class SessionsViewModel: ObservableObject {
         }
 
         do {
+            try Self.validateAttachmentFileSize(fileURL)
+            let contentType = try Self.validatedAttachmentContentType(for: fileURL)
             let data = try Data(contentsOf: fileURL)
-            let inferredType = UTType(filenameExtension: fileURL.pathExtension) ?? .data
-            let contentType = inferredType.preferredMIMEType ?? "application/octet-stream"
             let remotePath = try await storageService.upload(
                 data: data,
                 path: "users/\(user.id)/study-sessions/\(UUID().uuidString)-\(fileURL.lastPathComponent)",
@@ -202,9 +207,39 @@ final class SessionsViewModel: ObservableObject {
         }
     }
 
-    func removePendingAttachment(_ attachment: StudyAttachment) {
-        pendingAttachments.removeAll { $0.id == attachment.id }
-        analyticsService.track(event: "session_attachment_removed_pending")
+    private static func validateAttachmentFileSize(_ fileURL: URL) throws {
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+        guard let fileSize = values.fileSize else { return }
+
+        if fileSize >= maxAttachmentFileBytes {
+            throw AppError.network(description: "Study session attachments must be smaller than 10 MB.")
+        }
+    }
+
+    private static func validatedAttachmentContentType(for fileURL: URL) throws -> String {
+        let inferredType = UTType(filenameExtension: fileURL.pathExtension) ?? .data
+        let contentType = inferredType.preferredMIMEType ?? "application/octet-stream"
+        guard supportedAttachmentContentTypePrefixes.contains(where: { contentType.hasPrefix($0) }) else {
+            throw AppError.network(description: "This file type is not supported for study session attachments. Use a document, text file, or image.")
+        }
+        return contentType
+    }
+
+    func removePendingAttachment(_ attachment: StudyAttachment) async {
+        guard !isUploadingAttachment else { return }
+
+        errorMessage = nil
+        isUploadingAttachment = true
+        defer { isUploadingAttachment = false }
+
+        do {
+            try await storageService.delete(path: attachment.remotePath)
+            pendingAttachments.removeAll { $0.id == attachment.id }
+            errorMessage = nil
+            analyticsService.track(event: "session_attachment_removed_pending")
+        } catch {
+            errorMessage = AppError.wrap(error, fallback: "Unable to remove that attachment.").errorDescription
+        }
     }
 
     func removeAttachment(_ attachment: StudyAttachment, from session: StudySession) async {
@@ -496,7 +531,9 @@ private struct SessionComposer: View {
                         SessionAttachmentList(
                             attachments: viewModel.pendingAttachments,
                             isLoading: viewModel.isUploadingAttachment || viewModel.isStartingSession,
-                            onRemove: viewModel.removePendingAttachment
+                            onRemove: { attachment in
+                                Task { await viewModel.removePendingAttachment(attachment) }
+                            }
                         )
                     }
                 }

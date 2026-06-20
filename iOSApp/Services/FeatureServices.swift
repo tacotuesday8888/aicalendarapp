@@ -553,6 +553,7 @@ final class AssistantService: AssistantServicing {
 
 final class SyllabusImportService: SyllabusImportServicing {
     static let shared = SyllabusImportService()
+    private static let maxImportFileBytes = 10 * 1024 * 1024
 
     var databaseService: DatabaseServicing?
     var storageService: StorageServicing?
@@ -578,6 +579,7 @@ final class SyllabusImportService: SyllabusImportServicing {
             }
         }
 
+        try Self.validateImportFileSize(fileURL)
         let extractedText = try extractImportText(from: fileURL)
         _ = try requiredAIBackendService(aiBackendService)
         let data = try Data(contentsOf: fileURL)
@@ -612,6 +614,15 @@ final class SyllabusImportService: SyllabusImportServicing {
         try await requiredBackendFunctionService(backendFunctionService).deleteImport(
             DeleteImportPayload(userID: userID, job: job)
         )
+    }
+
+    private static func validateImportFileSize(_ fileURL: URL) throws {
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+        guard let fileSize = values.fileSize else { return }
+
+        if fileSize >= maxImportFileBytes {
+            throw AppError.network(description: "Syllabus files must be smaller than 10 MB. Choose a smaller text or searchable PDF file.")
+        }
     }
 
     private func extractImportText(from fileURL: URL) throws -> String {
@@ -754,6 +765,7 @@ final class SyllabusImportService: SyllabusImportServicing {
 }
 
 private actor PlannerAccumulator {
+    private let referenceDate: Date
     private var blocks = [PlannerBlock]()
     private var assignments = [Assignment]()
     private var habits = [Habit]()
@@ -765,7 +777,9 @@ private actor PlannerAccumulator {
     private var didLoadGoals = false
     private var didLoadSessions = false
 
-    init(referenceDate _: Date) {}
+    init(referenceDate: Date) {
+        self.referenceDate = referenceDate
+    }
 
     func updateBlocks(_ blocks: [PlannerBlock]) {
         self.blocks = blocks.sorted(by: { $0.startDate < $1.startDate })
@@ -805,8 +819,7 @@ private actor PlannerAccumulator {
         let activeGoals = goals.filter { $0.status == .active }
         let suggestedAction = incompleteAssignments.first.map { "Finish \($0.title)" } ?? activeGoals.first.map { "Move \( $0.title ) forward" } ?? "Protect one study block for your most important work."
 
-        let currentDate = Date.now
-        let hour = Calendar.current.component(.hour, from: currentDate)
+        let hour = Calendar.current.component(.hour, from: referenceDate)
         let nextMoment: CheckInMoment? =
             if hour < 11 {
                 .morning
@@ -817,7 +830,7 @@ private actor PlannerAccumulator {
             }
 
         return PlannerSnapshot(
-            date: currentDate,
+            date: referenceDate,
             blocks: blocks,
             assignments: incompleteAssignments,
             habits: habits,

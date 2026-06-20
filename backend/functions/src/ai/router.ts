@@ -5,6 +5,7 @@ import type { Request, Response } from "express";
 
 import { verifyAppCheckRequest } from "../shared/appCheck.js";
 import { aiFunctionOptions } from "../shared/functionOptions.js";
+import { parseJsonRequestBody } from "../shared/json.js";
 import { loadAssistantWorkflowContext, loadGoalPlanWorkflowContext } from "./context.js";
 import {
   storeAssistantChatReviewState,
@@ -58,7 +59,7 @@ export const ai = onRequest(aiFunctionOptions, async (request: Request, response
     await verifyAppCheckRequest(request, request.path || "ai");
     authUID = await verifyBearerToken(request);
 
-    const parseResult = aiRunRequestSchema.safeParse(parseBody(request));
+    const parseResult = aiRunRequestSchema.safeParse(parseJsonRequestBody(request.body));
     if (!parseResult.success) {
       response.status(400).json({
         error: {
@@ -167,14 +168,6 @@ function withDegradedFlag(response: AIRunSuccess, result: unknown): AIRunSuccess
 
 function isDegradedResult(result: unknown): boolean {
   return Boolean(result && typeof result === "object" && "degraded" in result && result.degraded === true);
-}
-
-function parseBody(request: Request): unknown {
-  if (typeof request.body === "string") {
-    return request.body.length ? JSON.parse(request.body) : {};
-  }
-
-  return request.body ?? {};
 }
 
 async function verifyBearerToken(request: Request): Promise<string> {

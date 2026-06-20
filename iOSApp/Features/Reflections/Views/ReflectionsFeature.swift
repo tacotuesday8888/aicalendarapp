@@ -20,6 +20,8 @@ final class ReflectionsViewModel: ObservableObject {
     private let aiBackendService: AIBackendServicing
     private let analyticsService: AnalyticsServicing
     private var tasks = [Task<Void, Never>]()
+    private static let aiUnavailableVibeFeedback =
+        "Saved. AI feedback is temporarily unavailable, but this reflection is still part of your check-in history."
 
     init(
         user: UserProfile,
@@ -126,24 +128,29 @@ final class ReflectionsViewModel: ObservableObject {
     private func vibeFeedback(for text: String) async throws -> (text: String, needsEscalation: Bool) {
         guard aiBackendService.isConfigured else {
             return (
-                "Saved. AI feedback is unavailable until the live AI backend is configured, but this reflection is still part of your check-in history.",
+                Self.aiUnavailableVibeFeedback,
                 false
             )
         }
 
-        let response = try await aiBackendService.run(
-            workflow: .vibeFeedback,
-            payload: AIVibeFeedbackPayload(
-                reflectionText: text,
-                timezone: TimeZone.current.identifier,
-                recentContext: [
-                    "mood": .string(selectedMood.rawValue),
-                    "screen": .string("reflections")
-                ]
-            ),
-            decode: AIVibeFeedbackResult.self
-        )
-        return (response.result.feedback, response.result.needsEscalation)
+        do {
+            let response = try await aiBackendService.run(
+                workflow: .vibeFeedback,
+                payload: AIVibeFeedbackPayload(
+                    reflectionText: text,
+                    timezone: TimeZone.current.identifier,
+                    recentContext: [
+                        "mood": .string(selectedMood.rawValue),
+                        "screen": .string("reflections")
+                    ]
+                ),
+                decode: AIVibeFeedbackResult.self
+            )
+            return (response.result.feedback, response.result.needsEscalation)
+        } catch {
+            analyticsService.record(error: error, context: "reflections_vibe_feedback")
+            return (Self.aiUnavailableVibeFeedback, false)
+        }
     }
 
     func deleteCheckIns(at offsets: IndexSet) {

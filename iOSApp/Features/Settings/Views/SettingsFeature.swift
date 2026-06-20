@@ -10,6 +10,7 @@ final class SettingsViewModel: ObservableObject {
     @Published var selectedCalendarIDs: Set<String>
     @Published var statusMessage = ""
     @Published var isRequestingNotifications = false
+    @Published private(set) var isLoadingCalendars = false
     @Published var isRestoringPurchases = false
     @Published var isSyncingCalendars = false
     @Published var isSavingProfile = false
@@ -57,12 +58,23 @@ final class SettingsViewModel: ObservableObject {
 
     func load() async {
         notificationState = await notificationService.currentSettings()
+        analyticsService.trackScreen("settings")
+    }
+
+    func loadCalendars() async {
+        guard !isLoadingCalendars else { return }
+
+        isLoadingCalendars = true
+        defer { isLoadingCalendars = false }
+
         do {
             availableCalendars = try await calendarSyncService.availableCalendars()
+            statusMessage = availableCalendars.isEmpty ? "No Apple calendars are available." : ""
+            analyticsService.track(event: "settings_calendar_access_requested")
         } catch {
+            availableCalendars = []
             statusMessage = AppError.wrap(error, fallback: "Unable to load available calendars.").errorDescription ?? ""
         }
-        analyticsService.trackScreen("settings")
     }
 
     func saveProfile(_ updated: UserProfile) async throws {
@@ -325,8 +337,19 @@ struct SettingsView: View {
 
             Section("Calendar Sync") {
                 if viewModel.availableCalendars.isEmpty {
-                    Text("No Apple calendars available yet.")
+                    Text("Connect Apple Calendar to choose calendars for import.")
                         .foregroundStyle(.secondary)
+                    Button {
+                        Task { await viewModel.loadCalendars() }
+                    } label: {
+                        if viewModel.isLoadingCalendars {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text("Connect Apple Calendar")
+                        }
+                    }
+                    .disabled(viewModel.isLoadingCalendars || viewModel.isSyncingCalendars)
                 } else {
                     ForEach(viewModel.availableCalendars) { calendar in
                         Toggle(isOn: Binding(
@@ -354,7 +377,11 @@ struct SettingsView: View {
                         Text("Refresh Apple Calendar import")
                     }
                 }
-                .disabled(viewModel.isSyncingCalendars)
+                .disabled(
+                    viewModel.isSyncingCalendars ||
+                    viewModel.isLoadingCalendars ||
+                    (viewModel.availableCalendars.isEmpty && viewModel.selectedCalendarIDs.isEmpty)
+                )
             }
 
             Section("Notifications") {

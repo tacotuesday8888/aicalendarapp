@@ -17,6 +17,8 @@ DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$WORK_ROOT/DerivedData}"
 SOURCE_PACKAGES_PATH="${SOURCE_PACKAGES_PATH:-$WORK_ROOT/SourcePackages}"
 RESULT_BUNDLE_PATH="${RESULT_BUNDLE_PATH:-$WORK_ROOT/aicalendarapp.xcresult}"
 PACKAGE_CACHE_PATH="${PACKAGE_CACHE_PATH:-$WORK_ROOT/PackageCache}"
+ROOT_PACKAGE_RESOLVED_PATH="${ROOT_PACKAGE_RESOLVED_PATH:-Package.resolved}"
+XCODE_PACKAGE_RESOLVED_PATH="${XCODE_PACKAGE_RESOLVED_PATH:-$PROJECT/project.xcworkspace/xcshareddata/swiftpm/Package.resolved}"
 if [[ -z "${PACKAGE_RESOLUTION_TIMEOUT_SECONDS:-}" ]]; then
   if [[ "${GITHUB_ACTIONS:-false}" == "true" ]]; then
     PACKAGE_RESOLUTION_TIMEOUT_SECONDS=900
@@ -212,6 +214,32 @@ replace_path_with_clean_directory() {
   mkdir -p "$path"
 }
 
+package_resolved_without_origin_hash() {
+  sed '/"originHash"[[:space:]]*:/d' "$1"
+}
+
+check_package_resolved_consistency() {
+  if [[ ! -f "$ROOT_PACKAGE_RESOLVED_PATH" || ! -f "$XCODE_PACKAGE_RESOLVED_PATH" ]]; then
+    return
+  fi
+
+  local diff_output
+  if ! diff_output="$(
+    diff -u \
+      <(package_resolved_without_origin_hash "$ROOT_PACKAGE_RESOLVED_PATH") \
+      <(package_resolved_without_origin_hash "$XCODE_PACKAGE_RESOLVED_PATH")
+  )"; then
+    echo "SwiftPM lockfiles have different dependency pins." >&2
+    echo "Sync $ROOT_PACKAGE_RESOLVED_PATH and $XCODE_PACKAGE_RESOLVED_PATH before running iOS CI." >&2
+    printf '%s\n' "$diff_output" >&2
+    exit 1
+  fi
+
+  if ! cmp -s "$ROOT_PACKAGE_RESOLVED_PATH" "$XCODE_PACKAGE_RESOLVED_PATH"; then
+    echo "SwiftPM lockfiles differ only by originHash; dependency pins are consistent."
+  fi
+}
+
 clear_package_resolution_state() {
   terminate_package_resolution_processes
   replace_path_with_clean_directory "$SOURCE_PACKAGES_PATH"
@@ -284,6 +312,8 @@ fi
 if [[ "$IOS_CI_GIT_LOW_SPEED_APPLIED" == "true" ]]; then
   echo "Git low-speed guard: ${IOS_CI_GIT_LOW_SPEED_LIMIT} bytes/s for ${IOS_CI_GIT_LOW_SPEED_TIME}s"
 fi
+
+check_package_resolved_consistency
 
 if [[ "$RESET_IOS_CI_PACKAGES" == "true" ]]; then
   clear_package_resolution_state
