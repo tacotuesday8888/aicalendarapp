@@ -109,7 +109,7 @@ PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" npm --prefix backend/functions run
 bash scripts/ci_ios.sh
 ```
 
-Local iOS CI uses the ignored `.build/ci-ios` directory for DerivedData and SwiftPM package cache reuse. If package resolution gets stuck on stale local package state, rerun with `RESET_IOS_CI_PACKAGES=true bash scripts/ci_ios.sh`. GitHub Actions restores `.build/ci-ios/PackageCache`, `.build/ci-ios/SourcePackages`, and SwiftPM's repository cache with a key derived from both tracked SwiftPM lockfiles: `Package.resolved` and `aicalendarapp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. The script allows Xcode's harmless `originHash` difference between those files, but fails before package resolution if the actual pinned dependency graph drifts. If a restored cache is stale or corrupt, the script clears package state before retrying. Local runs also apply `IOS_CI_GIT_LOW_SPEED_LIMIT` and `IOS_CI_GIT_LOW_SPEED_TIME` so dead SwiftPM Git fetches fail and retry instead of waiting for the full Xcode timeout; set both to empty values only when intentionally testing on a very slow but still active connection. The script also bounds simulator boot and unit-test execution with `IOS_CI_SIMULATOR_BOOT_TIMEOUT_SECONDS` and `IOS_CI_TEST_TIMEOUT_SECONDS`; increase those only when a slower Mac is still making progress, not when package resolution or simulator startup is idle.
+Local iOS CI uses the ignored `.build/ci-ios` directory for DerivedData and SwiftPM package cache reuse. If package resolution gets stuck on stale local package state, rerun with `RESET_IOS_CI_PACKAGES=true bash scripts/ci_ios.sh`. GitHub Actions restores `.build/ci-ios/PackageCache`, `.build/ci-ios/SourcePackages`, and SwiftPM's repository cache with a key derived from both tracked SwiftPM lockfiles: `Package.resolved` and `aicalendarapp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. The script allows Xcode's harmless `originHash` difference between those files, but fails before package resolution if the actual pinned dependency graph drifts. If a restored cache is stale or corrupt, the script clears package state before retrying. Local runs also apply `IOS_CI_GIT_LOW_SPEED_LIMIT` and `IOS_CI_GIT_LOW_SPEED_TIME` so dead SwiftPM Git fetches fail and retry instead of waiting for the full Xcode timeout; set both to empty values only when intentionally testing on a very slow but still active connection. The script also bounds simulator boot and unit-test execution with `IOS_CI_SIMULATOR_BOOT_TIMEOUT_SECONDS` and `IOS_CI_TEST_TIMEOUT_SECONDS`; increase those only when a slower Mac is still making progress, not when package resolution or simulator startup is idle. If local package resolution fails while downloading Firebase binary targets from `dl.google.com`, rerun from a stable network before treating it as an app-code failure.
 
 Also run dependency-audit triage before beta/release work:
 
@@ -119,14 +119,13 @@ npm --prefix backend/functions run audit:production
 
 This audit is currently expected to exit nonzero because it reports upstream Genkit/Firebase transitive OpenTelemetry and `uuid` advisories. Treat it as a tracked release-risk review, not a merge-blocking local verification check, until a compatible upstream fix or tested targeted override is available. Do not force `npm audit fix --force` without first confirming Firebase Functions and Genkit peer compatibility.
 
-As of June 19, 2026, the open Dependabot alerts are:
+As of June 20, 2026, the production audit reports:
 
-- `@opentelemetry/auto-instrumentations-node` high severity, fixed upstream at `0.75.0`.
-- `@opentelemetry/sdk-node` high severity, fixed upstream at `0.217.0`.
-- `@opentelemetry/core` medium severity, fixed upstream at `2.8.0`.
-- `uuid` medium severity, fixed upstream at `11.1.1`.
+- `@opentelemetry/auto-instrumentations-node <=0.76.0`, high severity, through the current Genkit Google Cloud dependency chain; npm reports no safe fix available.
+- `@opentelemetry/core <2.8.0`, medium severity, through the current Genkit/Firebase/OpenTelemetry dependency chain; npm reports no safe fix available.
+- `uuid <11.1.1`, medium severity, through current Firebase Admin, Google Cloud, and Genkit transitive dependencies; npm only offers breaking force fixes.
 
-Dependabot cannot currently produce safe PRs for these alerts. The `uuid` alert is constrained by the current Genkit/Firebase dependency tree, and the OpenTelemetry fix path would downgrade `@genkit-ai/google-genai` from `1.37.0` to `1.16.1`. A Dependabot PR for `firebase-admin@14.0.0` was also closed because `firebase-functions@7.2.5` only accepts `firebase-admin` `^11.10.0 || ^12.0.0 || ^13.0.0`. Keep these as monitored upstream dependency risks until compatible Firebase/Genkit releases are available or a targeted override has been tested through backend CI, rules tests, and live smoke.
+Dependabot cannot currently produce safe PRs for these alerts. The `uuid` alert is constrained by the current Genkit/Firebase dependency tree, and `npm audit fix --force` currently proposes breaking dependency changes such as `firebase-admin@14.0.0` or an incompatible Firebase Functions/Admin combination. Keep these as monitored upstream dependency risks until compatible Firebase/Genkit releases are available or a targeted override has been tested through backend CI, rules tests, and live smoke.
 
 Live smoke tests need a deployed Functions base URL, disposable Firebase ID token, optional App Check token, and a disposable test user:
 
