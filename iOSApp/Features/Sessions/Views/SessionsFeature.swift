@@ -160,6 +160,9 @@ final class SessionsViewModel: ObservableObject {
 
         do {
             try await studySessionService.deleteSession(id: session.id, for: user.id)
+            for attachment in session.attachments {
+                try? await storageService.delete(path: attachment.remotePath)
+            }
             errorMessage = nil
             analyticsService.track(event: "session_deleted")
         } catch {
@@ -222,9 +225,21 @@ final class SessionsViewModel: ObservableObject {
         return contentType
     }
 
-    func removePendingAttachment(_ attachment: StudyAttachment) {
-        pendingAttachments.removeAll { $0.id == attachment.id }
-        analyticsService.track(event: "session_attachment_removed_pending")
+    func removePendingAttachment(_ attachment: StudyAttachment) async {
+        guard !isUploadingAttachment else { return }
+
+        errorMessage = nil
+        isUploadingAttachment = true
+        defer { isUploadingAttachment = false }
+
+        do {
+            try await storageService.delete(path: attachment.remotePath)
+            pendingAttachments.removeAll { $0.id == attachment.id }
+            errorMessage = nil
+            analyticsService.track(event: "session_attachment_removed_pending")
+        } catch {
+            errorMessage = AppError.wrap(error, fallback: "Unable to remove that attachment.").errorDescription
+        }
     }
 
     func removeAttachment(_ attachment: StudyAttachment, from session: StudySession) async {
@@ -516,7 +531,9 @@ private struct SessionComposer: View {
                         SessionAttachmentList(
                             attachments: viewModel.pendingAttachments,
                             isLoading: viewModel.isUploadingAttachment || viewModel.isStartingSession,
-                            onRemove: viewModel.removePendingAttachment
+                            onRemove: { attachment in
+                                Task { await viewModel.removePendingAttachment(attachment) }
+                            }
                         )
                     }
                 }

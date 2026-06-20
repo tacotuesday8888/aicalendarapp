@@ -1720,6 +1720,77 @@ struct IOSAppTests {
         #expect(viewModel.errorMessage == "This file type is not supported for study session attachments. Use a document, text file, or image.")
     }
 
+    @Test func sessionsViewModelDeletesStorageObjectWhenPendingAttachmentIsRemoved() async throws {
+        let profile = testProfile(id: uniqueUserID("session-pending-attachment"))
+        let storageService = TestStorageService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SessionsViewModel(
+            user: profile,
+            studySessionService: TestStudySessionService(),
+            storageService: storageService,
+            analyticsService: analyticsService
+        )
+        let attachment = StudyAttachment(
+            fileName: "notes.pdf",
+            remotePath: "users/\(profile.id)/study-sessions/notes.pdf",
+            contentType: "application/pdf"
+        )
+        viewModel.pendingAttachments = [attachment]
+
+        await viewModel.removePendingAttachment(attachment)
+
+        #expect(storageService.deletedPaths == [attachment.remotePath])
+        #expect(viewModel.pendingAttachments.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+        #expect(!viewModel.isUploadingAttachment)
+        #expect(analyticsService.events.contains("session_attachment_removed_pending"))
+    }
+
+    @Test func sessionsViewModelDeletesStorageObjectsWhenSessionIsDeleted() async throws {
+        let profile = testProfile(id: uniqueUserID("session-delete-attachments"))
+        let studySessionService = TestStudySessionService()
+        let storageService = TestStorageService()
+        let analyticsService = TestAnalyticsService()
+        let viewModel = SessionsViewModel(
+            user: profile,
+            studySessionService: studySessionService,
+            storageService: storageService,
+            analyticsService: analyticsService
+        )
+        let attachments = [
+            StudyAttachment(
+                fileName: "outline.pdf",
+                remotePath: "users/\(profile.id)/study-sessions/outline.pdf",
+                contentType: "application/pdf"
+            ),
+            StudyAttachment(
+                fileName: "whiteboard.jpg",
+                remotePath: "users/\(profile.id)/study-sessions/whiteboard.jpg",
+                contentType: "image/jpeg"
+            )
+        ]
+        let session = StudySession(
+            title: "Biology review",
+            notes: "Chapter 4",
+            plannedMinutes: 45,
+            elapsedMinutes: 45,
+            status: .completed,
+            startedAt: Date(timeIntervalSince1970: 1_776_200_000),
+            endedAt: Date(timeIntervalSince1970: 1_776_202_700),
+            attachments: attachments
+        )
+        try await studySessionService.saveSession(session, for: profile.id)
+
+        viewModel.requestDelete(session)
+        await viewModel.confirmDelete()
+
+        #expect(studySessionService.deletedSessionIDs == [session.id])
+        #expect(storageService.deletedPaths == attachments.map(\.remotePath))
+        #expect(viewModel.pendingDeleteSession == nil)
+        #expect(viewModel.errorMessage == nil)
+        #expect(analyticsService.events.contains("session_deleted"))
+    }
+
     @Test func localSubscriptionStorePublishesRestoreAndPurchaseStateChanges() async {
         let userID = uniqueUserID("subscription")
         let store = LocalSubscriptionStore()
