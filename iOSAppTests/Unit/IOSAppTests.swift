@@ -1245,6 +1245,19 @@ struct IOSAppTests {
         }
     }
 
+    @Test func plannerSnapshotUsesRequestedReferenceDate() async throws {
+        let userID = uniqueUserID("planner-reference-date")
+        let database = TestDatabaseService()
+        let service = PlannerService()
+        service.databaseService = database
+        let referenceDate = Date(timeIntervalSince1970: 1_777_248_600)
+
+        var iterator = service.observeSnapshot(for: userID, on: referenceDate).makeAsyncIterator()
+        let snapshot = try await iterator.next()
+
+        #expect(snapshot?.date == referenceDate)
+    }
+
     @Test func calendarViewModelSavesUpdatesAndDeletesPlannerBlocks() async throws {
         let profile = testProfile(id: uniqueUserID("calendar-vm"))
         let plannerService = TestPlannerService()

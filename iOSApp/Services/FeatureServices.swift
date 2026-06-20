@@ -765,6 +765,7 @@ final class SyllabusImportService: SyllabusImportServicing {
 }
 
 private actor PlannerAccumulator {
+    private let referenceDate: Date
     private var blocks = [PlannerBlock]()
     private var assignments = [Assignment]()
     private var habits = [Habit]()
@@ -776,7 +777,9 @@ private actor PlannerAccumulator {
     private var didLoadGoals = false
     private var didLoadSessions = false
 
-    init(referenceDate _: Date) {}
+    init(referenceDate: Date) {
+        self.referenceDate = referenceDate
+    }
 
     func updateBlocks(_ blocks: [PlannerBlock]) {
         self.blocks = blocks.sorted(by: { $0.startDate < $1.startDate })
@@ -816,8 +819,7 @@ private actor PlannerAccumulator {
         let activeGoals = goals.filter { $0.status == .active }
         let suggestedAction = incompleteAssignments.first.map { "Finish \($0.title)" } ?? activeGoals.first.map { "Move \( $0.title ) forward" } ?? "Protect one study block for your most important work."
 
-        let currentDate = Date.now
-        let hour = Calendar.current.component(.hour, from: currentDate)
+        let hour = Calendar.current.component(.hour, from: referenceDate)
         let nextMoment: CheckInMoment? =
             if hour < 11 {
                 .morning
@@ -828,7 +830,7 @@ private actor PlannerAccumulator {
             }
 
         return PlannerSnapshot(
-            date: currentDate,
+            date: referenceDate,
             blocks: blocks,
             assignments: incompleteAssignments,
             habits: habits,

@@ -49,6 +49,11 @@ Secrets.*.xcconfig
 *.pem
 *.key
 *.keystore
+*.xcarchive/
+*.xcresult/
+*.resultbundle/
+*.dSYM/
+*.ipa
 ExportOptions.plist
 fastlane/.env*
 fastlane/Appfile
