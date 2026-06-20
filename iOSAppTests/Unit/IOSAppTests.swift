@@ -1421,7 +1421,17 @@ struct IOSAppTests {
         #expect(goalService.goals.isEmpty)
         #expect(viewModel.errorMessage == "Goal title is required.")
 
-        var existingGoal = Goal(title: "Existing", detail: "", priority: .high, category: .academic, status: .active)
+        var existingGoal = Goal(
+            title: "Existing",
+            detail: "",
+            priority: .high,
+            category: .academic,
+            status: .active,
+            dueDate: nil,
+            sortIndex: 0,
+            subGoals: [],
+            checkpoints: []
+        )
         existingGoal.title = "  "
 
         await #expect(throws: AppError.unknown("Goal title is required.")) {
