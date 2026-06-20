@@ -1284,8 +1284,8 @@ struct IOSAppTests {
         )
 
         let dueDate = Date(timeIntervalSince1970: 1_776_500_000)
-        viewModel.title = "Finish biology chapter"
-        viewModel.detail = "Read, annotate, and summarize."
+        viewModel.title = "  Finish biology chapter  "
+        viewModel.detail = "  Read, annotate, and summarize.  "
         viewModel.selectedPriority = .high
         viewModel.selectedCategory = .academic
         viewModel.dueDate = dueDate
@@ -1294,6 +1294,7 @@ struct IOSAppTests {
 
         let createdGoal = try #require(goalService.goals.first)
         #expect(createdGoal.title == "Finish biology chapter")
+        #expect(createdGoal.detail == "Read, annotate, and summarize.")
         #expect(createdGoal.status == .active)
         #expect(viewModel.title.isEmpty)
         #expect(analyticsService.events.contains("goal_created"))
@@ -1304,12 +1305,13 @@ struct IOSAppTests {
         #expect(completedGoal.status == .completed)
 
         var editedGoal = completedGoal
-        editedGoal.title = "Finish biology chapter and quiz"
-        editedGoal.detail = "Add end-of-chapter quiz questions."
+        editedGoal.title = "  Finish biology chapter and quiz  "
+        editedGoal.detail = "  Add end-of-chapter quiz questions.  "
         viewModel.beginEditing(completedGoal)
         try await viewModel.saveEdits(editedGoal)
 
         #expect(goalService.goals.first?.title == "Finish biology chapter and quiz")
+        #expect(goalService.goals.first?.detail == "Add end-of-chapter quiz questions.")
         #expect(viewModel.editingGoal == nil)
         #expect(analyticsService.events.contains("goal_updated"))
 
@@ -1320,6 +1322,32 @@ struct IOSAppTests {
         #expect(goalService.goals.isEmpty)
         #expect(viewModel.pendingDeleteGoal == nil)
         #expect(analyticsService.events.contains("goal_deleted"))
+    }
+
+    @Test func goalsViewModelRejectsBlankGoalTitlesBeforeSaving() async {
+        let profile = testProfile(id: uniqueUserID("goals-vm-blank-title"))
+        let goalService = TestGoalService()
+        let viewModel = GoalsViewModel(
+            user: profile,
+            goalService: goalService,
+            databaseService: TestDatabaseService(),
+            analyticsService: TestAnalyticsService()
+        )
+
+        viewModel.title = "   "
+        await viewModel.addGoal()
+
+        #expect(goalService.goals.isEmpty)
+        #expect(viewModel.errorMessage == "Goal title is required.")
+
+        var existingGoal = Goal(title: "Existing", detail: "", priority: .high, category: .academic, status: .active)
+        existingGoal.title = "  "
+
+        await #expect(throws: AppError.unknown("Goal title is required.")) {
+            try await viewModel.saveEdits(existingGoal)
+        }
+        #expect(goalService.goals.isEmpty)
+        #expect(viewModel.errorMessage == "Goal title is required.")
     }
 
     @Test func goalsViewModelShowsGeneratedPlanImmediatelyWithoutClientWrite() async throws {

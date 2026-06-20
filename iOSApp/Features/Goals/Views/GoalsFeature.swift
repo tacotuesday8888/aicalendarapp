@@ -75,15 +75,20 @@ final class GoalsViewModel: ObservableObject {
     }
 
     func addGoal() async {
-        guard !title.isEmpty, !isAddingGoal else { return }
+        let trimmedTitle = Self.normalizedText(title)
+        guard !isAddingGoal else { return }
+        guard !trimmedTitle.isEmpty else {
+            errorMessage = AppError.unknown("Goal title is required.").errorDescription
+            return
+        }
 
         errorMessage = nil
         isAddingGoal = true
         defer { isAddingGoal = false }
 
         let goal = Goal(
-            title: title,
-            detail: detail,
+            title: trimmedTitle,
+            detail: Self.normalizedText(detail),
             priority: selectedPriority,
             category: selectedCategory,
             status: .active,
@@ -133,7 +138,16 @@ final class GoalsViewModel: ObservableObject {
         goalActionID = updated.id
         defer { goalActionID = nil }
 
-        try await goalService.updateGoal(updated, for: user.id)
+        var normalized = updated
+        normalized.title = Self.normalizedText(updated.title)
+        normalized.detail = Self.normalizedText(updated.detail)
+        guard !normalized.title.isEmpty else {
+            let error = AppError.unknown("Goal title is required.")
+            errorMessage = error.errorDescription
+            throw error
+        }
+
+        try await goalService.updateGoal(normalized, for: user.id)
         editingGoal = nil
         errorMessage = nil
         analyticsService.track(event: "goal_updated")
@@ -298,6 +312,10 @@ final class GoalsViewModel: ObservableObject {
 
     private static func normalizedTitle(_ title: String) -> String {
         title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func normalizedText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func checkpointKey(_ checkpoint: GoalCheckpoint) -> String {
