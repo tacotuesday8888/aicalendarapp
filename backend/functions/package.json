@@ -20,7 +20,7 @@
     "audit:production": "npm audit --omit=dev --audit-level=moderate"
   },
   "dependencies": {
-    "@genkit-ai/google-genai": "^1.37.0",
+    "@genkit-ai/google-genai": "^1.39.0",
     "firebase-admin": "^13.10.0",
     "firebase-functions": "^7.2.5",
     "genkit": "^1.37.0",
