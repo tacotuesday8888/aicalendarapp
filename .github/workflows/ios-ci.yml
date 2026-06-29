@@ -65,7 +65,7 @@ jobs:
 
       - name: Restore SwiftPM package cache
         if: steps.changes.outputs.ios_changed == 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             .build/ci-ios/PackageCache
