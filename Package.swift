@@ -13,7 +13,7 @@ let package = Package(
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", from: "12.7.0"),
         .package(url: "https://github.com/RevenueCat/purchases-ios.git", from: "5.49.2"),
         .package(url: "https://github.com/superwall/Superwall-iOS.git", from: "4.10.6"),
-        .package(url: "https://github.com/google/GoogleSignIn-iOS.git", from: "9.0.0")
+        .package(url: "https://github.com/google/GoogleSignIn-iOS.git", from: "10.0.0")
     ],
     targets: [
         .target(
